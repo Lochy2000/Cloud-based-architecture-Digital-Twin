@@ -1,0 +1,32 @@
+# --- Python ---
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.venv/
+venv/
+
+# --- Secrets / per-configuration environment (D-26) ---
+# Only .env.example files are committed. Real .env files carry
+# broker credentials and certificate paths and must never be pushed.
+config/env/*.env
+!config/env/*.env.example
+*.pem
+*.crt
+*.key
+
+# --- Docker ---
+docker-compose.override.yml
+
+# --- Data / experiment output (large, regenerable, not source) ---
+# decision_register.csv and similar working documents stay tracked;
+# only generated run output is ignored here.
+experiments/**/*.csv
+payload_sample.json
+influxdb-data/
+grafana-data/
+
+# --- OS / editor ---
+.DS_Store
+.vscode/
+*.swp

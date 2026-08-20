@@ -90,6 +90,8 @@ def load_broker_config() -> BrokerConfig:
     username+password while C2b (AWS IoT Core) uses mutual TLS with
     X.509 certificates — materially different, not a variant of the same
     thing.
+
+    values to be added to env instead of hardcoding
     """
     host = _require("BROKER_HOST")
     port = _require_int("BROKER_PORT")
