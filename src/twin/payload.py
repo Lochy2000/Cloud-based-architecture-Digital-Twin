@@ -45,3 +45,49 @@ class TelemetryPayload:
     ambient_temperature_c: float
     power_draw_kw: float
     setpoint_c: float
+
+def build_payload(asset_id: str, sequence: int, timestamp: datetime, readings: dict) -> TelemetryPayload:
+    """
+    Called by publisher.py once per tick, with the reading set
+    simulator.py's pure function returned. timestamp is a required,
+    explicit argument, not generated here, so the simulator's output
+    and the payload's timestamp always come from the same clock read
+    rather than two datetime.now() calls microseconds apart.
+    """
+    if not asset_id or not isinstance(asset_id, str):
+        raise PayloadError(f"asset_id must be a non-empty string, got {asset_id!r}")
+
+    if not isinstance(sequence, int) or isinstance(sequence, bool) or sequence < 0:
+        raise PayloadError(f"sequence must be a non-negative integer, got {sequence!r}")
+
+    if not isinstance(timestamp, datetime) or timestamp.tzinfo is None:
+        raise PayloadError(f"timestamp must be a timezone-aware datetime, got {timestamp!r}")
+    if timestamp.utcoffset().total_seconds() != 0:
+        raise PayloadError(f"timestamp must be UTC (offset 0), got offset {timestamp.utcoffset()}")
+
+    _validate_channels(readings)
+
+    return TelemetryPayload(
+        asset_id=asset_id,
+        timestamp=timestamp.isoformat(timespec="milliseconds"),
+        sequence=sequence,
+        schema_version=SCHEMA_VERSION,
+        **{channel: float(readings[channel]) for channel in CHANNELS},
+    )
+
+def _validate_channels(readings: dict) -> None:
+    if not isinstance(readings, dict):
+        raise PayloadError(f"readings must be a dict, got {type(readings).__name__}")
+
+    missing = set(CHANNELS) - readings.keys()
+    if missing:
+        raise PayloadError(f"readings missing channel(s): {sorted(missing)}")
+
+    extra = readings.keys() - set(CHANNELS)
+    if extra:
+        raise PayloadError(f"readings has unexpected channel(s): {sorted(extra)}")
+
+    for channel in CHANNELS:
+        value = readings[channel]
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            raise PayloadError(f"readings[{channel!r}] must be a number, got {value!r}")
