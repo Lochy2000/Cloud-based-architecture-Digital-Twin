@@ -84,7 +84,7 @@ class BrokerConfig:
 def load_broker_config() -> BrokerConfig:
     """
     Shared by every entrypoint that talks to a broker (publisher.py,
-    storage_writer.py, and Stage 4's mqtt_client.py connection factory).
+    storage_writer.py, and any mqtt client).
 
     auth_mode branches the required variables, because C1/C2a use
     username+password while C2b (AWS IoT Core) uses mutual TLS with
@@ -120,4 +120,23 @@ def load_broker_config() -> BrokerConfig:
         username=username, password=password,
         ca_cert=ca_cert, client_cert=client_cert, client_key=client_key,
         keepalive=keepalive,
+    )
+
+# --- InfluxDB config ------------------------------------------------------
+
+@dataclass(frozen=True)
+class InfluxConfig:
+    url: str
+    token: str
+    org: str
+    bucket: str
+
+
+def load_influx_config() -> InfluxConfig:
+    """Needed only by storage_writer.py and the M1.6 payload-capture utility."""
+    return InfluxConfig(
+        url=_require("INFLUX_URL"),
+        token=_require("INFLUX_TOKEN"),
+        org=_require("INFLUX_ORG"),
+        bucket=_require("INFLUX_BUCKET"),
     )
