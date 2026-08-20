@@ -22,3 +22,25 @@ tests/test_config.py::TestLoadWorkloadConfig::test_zero_interval_is_rejected PAS
 tests/test_config.py::TestLoadWorkloadConfig::test_negative_interval_is_rejected PASSED       [100%]
 
 ======================================== 12 passed in 0.17s ========================================
+
+## Loggind setup test
+### pytest tests/test_logging_setup.py -v
+(.venv) PS C:\Users\User\MSC-software-eng\PersonalProject\DT\digital-twin> pytest tests/test_logging_setup.py -v
+==================================================== test session starts =====================================================
+platform win32 -- Python 3.11.9, pytest-9.1.1, pluggy-1.6.0 -- C:\Users\User\MSC-software-eng\PersonalProject\DT\digital-twin\.venv\Scripts\python.exe
+cachedir: .pytest_cache
+rootdir: C:\Users\User\MSC-software-eng\PersonalProject\DT\digital-twin
+configfile: pytest.ini
+collected 9 items                                                                                                             
+
+tests/test_logging_setup.py::TestSetupLogging::test_log_line_is_valid_json_with_required_fields PASSED                  [ 11%]
+tests/test_logging_setup.py::TestSetupLogging::test_timestamp_is_iso8601_utc_with_millisecond_precision PASSED          [ 22%]
+tests/test_logging_setup.py::TestSetupLogging::test_extra_fields_are_merged_into_payload PASSED                         [ 33%]
+tests/test_logging_setup.py::TestSetupLogging::test_exception_info_is_captured PASSED                                   [ 44%]
+tests/test_logging_setup.py::TestSetupLogging::test_repeated_setup_does_not_duplicate_handlers PASSED                   [ 55%]
+tests/test_logging_setup.py::TestSetupLogging::test_explicit_level_overrides_default PASSED                             [ 66%]
+tests/test_logging_setup.py::TestSetupLogging::test_log_level_env_var_used_when_no_explicit_level PASSED                [ 77%]
+tests/test_logging_setup.py::TestSetupLogging::test_default_level_is_info_when_nothing_specified PASSED                 [ 88%]
+tests/test_logging_setup.py::TestSetupLogging::test_does_not_propagate_to_root_logger PASSED                            [100%]
+
+===================================================== 9 passed in 0.10s ======================================================
