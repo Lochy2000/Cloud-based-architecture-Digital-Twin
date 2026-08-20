@@ -62,6 +62,62 @@ def _require_existing_file(name: str) -> str:
     return path
 
 
-# def _optional(name: str, default: str) -> str:
-#     return os.environ.get(name, default)
+def _optional(name: str, default: str) -> str:
+    return os.environ.get(name, default)
 
+# --- broker config ------------------------------------------------------
+
+@dataclass(frozen=True)
+class BrokerConfig:
+    host: str
+    port: int
+    tls: bool
+    auth_mode: str          # "password" or "cert"
+    username: Optional[str]
+    password: Optional[str]
+    ca_cert: Optional[str]
+    client_cert: Optional[str]
+    client_key: Optional[str]
+    keepalive: int
+
+
+def load_broker_config() -> BrokerConfig:
+    """
+    Shared by every entrypoint that talks to a broker (publisher.py,
+    storage_writer.py, and Stage 4's mqtt_client.py connection factory).
+
+    auth_mode branches the required variables, because C1/C2a use
+    username+password while C2b (AWS IoT Core) uses mutual TLS with
+    X.509 certificates — materially different, not a variant of the same
+    thing.
+    """
+    host = _require("BROKER_HOST")
+    port = _require_int("BROKER_PORT")
+    tls = _require_bool("BROKER_TLS")
+    auth_mode = _require("BROKER_AUTH_MODE").strip().lower()
+
+    if auth_mode not in ("password", "cert"):
+        raise ConfigError(
+            f"BROKER_AUTH_MODE={auth_mode!r} must be 'password' or 'cert' "
+            "('password' for C1/C2a, 'cert' for C2b)"
+        )
+
+    username = password = None
+    ca_cert = client_cert = client_key = None
+
+    if auth_mode == "password":
+        username = _require("BROKER_USERNAME")
+        password = _require("BROKER_PASSWORD")
+    else:
+        ca_cert = _require_existing_file("BROKER_CA_CERT")
+        client_cert = _require_existing_file("BROKER_CLIENT_CERT")
+        client_key = _require_existing_file("BROKER_CLIENT_KEY")
+
+    keepalive = int(_optional("BROKER_KEEPALIVE", "60"))
+
+    return BrokerConfig(
+        host=host, port=port, tls=tls, auth_mode=auth_mode,
+        username=username, password=password,
+        ca_cert=ca_cert, client_cert=client_cert, client_key=client_key,
+        keepalive=keepalive,
+    )
