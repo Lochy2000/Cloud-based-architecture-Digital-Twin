@@ -140,3 +140,24 @@ def load_influx_config() -> InfluxConfig:
         org=_require("INFLUX_ORG"),
         bucket=_require("INFLUX_BUCKET"),
     )
+
+# --- workload config ------------------------------------------------------
+
+@dataclass(frozen=True)
+class WorkloadConfig:
+    asset_config_path: str
+    publish_interval_seconds: float
+
+
+def load_workload_config() -> WorkloadConfig:
+    """Needed only by publisher.py: which asset to simulate, how often to publish."""
+    asset_path = _require_existing_file("ASSET_CONFIG_PATH")
+
+    interval = _require_float("PUBLISH_INTERVAL_SECONDS")
+    if interval <= 0:
+        raise ConfigError(f"PUBLISH_INTERVAL_SECONDS={interval} must be greater than 0")
+
+    return WorkloadConfig(
+        asset_config_path=asset_path,
+        publish_interval_seconds=interval,
+    )
