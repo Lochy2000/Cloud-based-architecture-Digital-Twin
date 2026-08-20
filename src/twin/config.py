@@ -29,3 +29,39 @@ def _require(name: str) -> str:
     if not value:
         raise ConfigError(f"Missing required environment variable: {name}")
     return value
+
+def _require_int(name: str) -> int:
+    raw = _require(name)
+    try:
+        return int(raw)
+    except ValueError:
+        raise ConfigError(f"Environment variable {name}={raw!r} is not a valid integer")
+
+
+def _require_float(name: str) -> float:
+    raw = _require(name)
+    try:
+        return float(raw)
+    except ValueError:
+        raise ConfigError(f"Environment variable {name}={raw!r} is not a valid number")
+
+
+def _require_bool(name: str) -> bool:
+    raw = _require(name).strip().lower()
+    if raw in ("true", "1", "yes"):
+        return True
+    if raw in ("false", "0", "no"):
+        return False
+    raise ConfigError(f"Environment variable {name}={raw!r} must be true/false")
+
+
+def _require_existing_file(name: str) -> str:
+    path = _require(name)
+    if not os.path.isfile(path):
+        raise ConfigError(f"{name}={path!r} does not point to an existing file")
+    return path
+
+
+# def _optional(name: str, default: str) -> str:
+#     return os.environ.get(name, default)
+
