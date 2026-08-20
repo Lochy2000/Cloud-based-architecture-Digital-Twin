@@ -33,3 +33,15 @@ _ALL_FIELDS = frozenset(_NON_CHANNEL_FIELDS + CHANNELS)
 
 class PayloadError(Exception):
     """Raised when a payload cannot be built, or a received payload is malformed."""
+
+@dataclass(frozen=True)
+class TelemetryPayload:
+    asset_id: str
+    timestamp: str  # ISO-8601, UTC, millisecond precision — matches logging_setup.py
+    sequence: int
+    schema_version: str
+    supply_temperature_c: float
+    return_temperature_c: float
+    ambient_temperature_c: float
+    power_draw_kw: float
+    setpoint_c: float
