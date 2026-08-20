@@ -46,3 +46,31 @@ class JSONFormatter(logging.Formatter):
             payload["exception"] = self.formatException(record.exc_info)
 
         return json.dumps(payload, default=str)
+
+def setup_logging(component: str, level: str | None = None) -> logging.Logger:
+    """
+    Call once, at process startup, in each entrypoint (publisher.py,
+    storage_writer.py). The logger is named after the component so log
+    lines are attributable when several services' output is read
+    together during fault-injection trials.
+
+    level falls back to the LOG_LEVEL environment variable, then to
+    INFO, keeping this consistent without adding a whole
+    LoggingConfig loader in config.py for one string.
+    """
+    resolved_level = (level or os.environ.get("LOG_LEVEL", "INFO")).upper()
+
+    logger = logging.getLogger(component)
+    logger.setLevel(resolved_level)
+    logger.propagate = False
+
+    if logger.handlers:
+        # Guards against duplicate log lines if setup_logging is called
+        # more than once for the same component (happens in tests).
+        return logger
+
+    handler = logging.StreamHandler(sys.stdout)
+    handler.setFormatter(JSONFormatter())
+    logger.addHandler(handler)
+
+    return logger
