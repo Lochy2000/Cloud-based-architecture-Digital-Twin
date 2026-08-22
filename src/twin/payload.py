@@ -18,7 +18,7 @@ SCHEMA_VERSION = "1.0"
 
 # The fixed base-case channel set. One
 # non-temperature channel (power draw) so the payload is not
-# homogeneous. This tuple is the single place that set is defined 
+# homogeneous this tuple is the single place that set is defined 
 # simulator.py and tests both import it rather than re-listing it.
 CHANNELS = (
     "supply_temperature_c",
@@ -91,3 +91,7 @@ def _validate_channels(readings: dict) -> None:
         value = readings[channel]
         if isinstance(value, bool) or not isinstance(value, (int, float)):
             raise PayloadError(f"readings[{channel!r}] must be a number, got {value!r}")
+
+def serialize(payload: TelemetryPayload) -> bytes:
+    """UTF-8 JSON, sorted keys — deterministic, so byte size is comparable run to run (M1.6)."""
+    return json.dumps(asdict(payload), sort_keys=True).encode("utf-8")
