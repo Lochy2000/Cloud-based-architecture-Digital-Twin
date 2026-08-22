@@ -93,5 +93,49 @@ def _validate_channels(readings: dict) -> None:
             raise PayloadError(f"readings[{channel!r}] must be a number, got {value!r}")
 
 def serialize(payload: TelemetryPayload) -> bytes:
+
     """UTF-8 JSON, sorted keys — deterministic, so byte size is comparable run to run (M1.6)."""
     return json.dumps(asdict(payload), sort_keys=True).encode("utf-8")
+
+def parse(raw: bytes) -> TelemetryPayload:
+    """
+    called by storage_writer.py on every message received off the
+    wire. Unlike build_payload, this is the pipeline's boundary with
+    untrusted input e.g a corrupted message, a schema-version mismatch,
+    or  a deliberately malformed payload all
+    to fail here with a named reason, not an unhandled exception
+    inside the MQTT callback.
+    """
+    try:
+        data = json.loads(raw.decode("utf-8"))
+    except (json.JSONDecodeError, UnicodeDecodeError) as exc:
+        raise PayloadError(f"payload is not valid UTF-8 JSON: {exc}") from exc
+
+    if not isinstance(data, dict):
+        raise PayloadError(f"payload must be a JSON object, got {type(data).__name__}")
+
+    missing = _ALL_FIELDS - data.keys()
+    if missing:
+        raise PayloadError(f"payload missing required field(s): {sorted(missing)}")
+
+    extra = data.keys() - _ALL_FIELDS
+    if extra:
+        raise PayloadError(f"payload has unexpected field(s): {sorted(extra)}")
+
+    if data["schema_version"] != SCHEMA_VERSION:
+        raise PayloadError(
+            f"unsupported schema_version {data['schema_version']!r}, expected {SCHEMA_VERSION!r}"
+        )
+
+    if not isinstance(data["sequence"], int) or isinstance(data["sequence"], bool) or data["sequence"] < 0:
+        raise PayloadError(f"sequence must be a non-negative integer, got {data['sequence']!r}")
+
+    if not isinstance(data["asset_id"], str) or not data["asset_id"]:
+        raise PayloadError(f"asset_id must be a non-empty string, got {data['asset_id']!r}")
+
+    for channel in CHANNELS:
+        value = data[channel]
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            raise PayloadError(f"{channel} must be a number, got {value!r}")
+
+    return TelemetryPayload(**data)
