@@ -44,3 +44,37 @@ tests/test_logging_setup.py::TestSetupLogging::test_default_level_is_info_when_n
 tests/test_logging_setup.py::TestSetupLogging::test_does_not_propagate_to_root_logger PASSED                            [100%]
 
 ===================================================== 9 passed in 0.10s ======================================================
+
+
+## Payload tests
+### pytest tests/test_payload.py -v
+
+==================================================== test session starts =====================================================
+platform win32 -- Python 3.11.9, pytest-9.1.1, pluggy-1.6.0 -- C:\Users\User\MSC-software-eng\PersonalProject\DT\digital-twin\.venv\Scripts\python.exe
+cachedir: .pytest_cache
+rootdir: C:\Users\User\MSC-software-eng\PersonalProject\DT\digital-twin
+configfile: pytest.ini
+collected 20 items                                                                                                            
+
+tests/test_payload.py::TestBuildPayload::test_builds_a_valid_payload PASSED                                             [  5%]
+tests/test_payload.py::TestBuildPayload::test_rejects_empty_asset_id PASSED                                             [ 10%]
+tests/test_payload.py::TestBuildPayload::test_rejects_negative_sequence PASSED                                          [ 15%]
+tests/test_payload.py::TestBuildPayload::test_rejects_non_integer_sequence PASSED                                       [ 20%]
+tests/test_payload.py::TestBuildPayload::test_rejects_bool_as_sequence PASSED                                           [ 25%]
+tests/test_payload.py::TestBuildPayload::test_rejects_naive_timestamp PASSED                                            [ 30%]
+tests/test_payload.py::TestBuildPayload::test_rejects_non_utc_timestamp PASSED                                          [ 35%]
+tests/test_payload.py::TestBuildPayload::test_rejects_missing_channel PASSED                                            [ 40%]
+tests/test_payload.py::TestBuildPayload::test_rejects_unexpected_channel PASSED                                         [ 45%]
+tests/test_payload.py::TestBuildPayload::test_rejects_non_numeric_channel_value PASSED                                  [ 50%]
+tests/test_payload.py::TestRoundTrip::test_parse_of_serialize_equals_original PASSED                                    [ 55%]
+tests/test_payload.py::TestRoundTrip::test_round_trip_preserves_every_field_value PASSED                                [ 60%]
+tests/test_payload.py::TestParseRejectsMalformedInput::test_rejects_non_json_bytes PASSED                               [ 65%]
+tests/test_payload.py::TestParseRejectsMalformedInput::test_rejects_json_that_is_not_an_object PASSED                   [ 70%]
+tests/test_payload.py::TestParseRejectsMalformedInput::test_rejects_missing_field PASSED                                [ 75%]
+tests/test_payload.py::TestParseRejectsMalformedInput::test_rejects_unexpected_field PASSED                             [ 80%]
+tests/test_payload.py::TestParseRejectsMalformedInput::test_rejects_wrong_schema_version PASSED                         [ 85%]
+tests/test_payload.py::TestParseRejectsMalformedInput::test_rejects_negative_sequence PASSED                            [ 90%]
+tests/test_payload.py::TestParseRejectsMalformedInput::test_rejects_non_numeric_channel PASSED                          [ 95%]
+tests/test_payload.py::TestMeasuredByteSize::test_representative_payload_is_248_bytes PASSED                            [100%]
+
+===================================================== 20 passed in 0.16s =====================================================
