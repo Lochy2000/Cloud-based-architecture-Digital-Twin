@@ -99,3 +99,37 @@ def _attach_logging_callbacks(client: mqtt.Client, logger, component: str) -> No
                 "component": component,
             },
         )
+def connect(client: mqtt.Client, config: BrokerConfig, timeout: float = 10.0) -> None:
+    """
+    connect and start the network loop in a background thread.
+
+    this blocks until the broker confirms the connection or timeout elapses, so a
+    misconfigured broker fails at startup rather than silently never publishing or pblish
+    wrong values
+    """
+    connected = threading.Event()
+    original_on_connect = client.on_connect
+
+    def on_connect_wrapper(client, userdata, flags, reason_code, properties):
+        original_on_connect(client, userdata, flags, reason_code, properties)
+        if reason_code == 0:
+            connected.set()
+
+    client.on_connect = on_connect_wrapper
+
+    try:
+        client.connect(config.host, config.port, keepalive=config.keepalive)
+    except (OSError, ssl.SSLError) as exc:
+        raise MQTTClientError(
+            f"could not connect to {config.host}:{config.port}: {exc}"
+        ) from exc
+
+    client.loop_start()
+
+    if not connected.wait(timeout=timeout):
+        client.loop_stop()
+        raise MQTTClientError(
+            f"no CONNACK from {config.host}:{config.port} within {timeout}s"
+        )
+
+    client.on_connect = original_on_connect
