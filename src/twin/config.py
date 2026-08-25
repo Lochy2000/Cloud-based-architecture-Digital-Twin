@@ -83,7 +83,7 @@ class BrokerConfig:
 
 def load_broker_config() -> BrokerConfig:
     """
-    Shared by every entrypoint that talks to a broker (publisher.py,
+    shared by every entrypoint that talks to a broker (publisher.py,
     storage_writer.py, and any mqtt client).
 
     auth_mode branches the required variables, because C1/C2a use
@@ -133,6 +133,15 @@ class InfluxConfig:
     org: str
     bucket: str
 
+def _require_qos(name: str) -> int:
+    raw = _require(name)
+    try:
+        value = int(raw)
+    except ValueError:
+        raise ConfigError(f"Environment variable {name}={raw!r} is not a valid integer")
+    if value not in (0, 1, 2):
+        raise ConfigError(f"{name}={value} must be 0, 1 or 2")
+    return value
 
 def load_influx_config() -> InfluxConfig:
     """Needed only by storage_writer.py and the M1.6 payload-capture utility."""
