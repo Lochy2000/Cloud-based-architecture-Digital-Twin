@@ -78,3 +78,56 @@ tests/test_payload.py::TestParseRejectsMalformedInput::test_rejects_non_numeric_
 tests/test_payload.py::TestMeasuredByteSize::test_representative_payload_is_248_bytes PASSED                            [100%]
 
 ===================================================== 20 passed in 0.16s =====================================================
+
+
+
+## Simulator test
+### pytest tests/test_simulator.py -v
+- failed test is fine its just the boundary time not running 
+
+==================================================== test session starts ====================================================
+platform win32 -- Python 3.11.9, pytest-9.1.1, pluggy-1.6.0 -- C:\Users\User\MSC-software-eng\PersonalProject\DT\digital-twin\.venv\Scripts\python.exe
+cachedir: .pytest_cache
+rootdir: C:\Users\User\MSC-software-eng\PersonalProject\DT\digital-twin
+configfile: pytest.ini
+collected 13 items                                                                                                           
+
+tests/test_simulator.py::TestOutsideOperatingHours::test_returns_ambient_before_start PASSED                           [  7%]
+tests/test_simulator.py::TestOutsideOperatingHours::test_returns_ambient_after_end PASSED                              [ 15%]
+tests/test_simulator.py::TestBoilerOnOff::test_boiler_on_in_first_half_of_cycle PASSED                                 [ 23%]
+tests/test_simulator.py::TestBoilerOnOff::test_boiler_off_in_second_half_of_cycle PASSED                               [ 30%]
+tests/test_simulator.py::TestBoilerOnOff::test_boiler_cycles_predictably FAILED                                        [ 38%]
+tests/test_simulator.py::TestNewtonsCooling::test_supply_temp_on_is_higher_than_baseline PASSED                        [ 46%]
+tests/test_simulator.py::TestNewtonsCooling::test_supply_temp_off_approaches_ambient PASSED                            [ 53%]
+tests/test_simulator.py::TestNewtonsCooling::test_return_temperature_delta_preserved PASSED                            [ 61%]
+tests/test_simulator.py::TestNewtonsCooling::test_exponential_approach_heating PASSED                                  [ 69%]
+tests/test_simulator.py::TestAmbientsAndSetpoint::test_setpoint_always_reported PASSED                                 [ 76%]
+tests/test_simulator.py::TestAmbientsAndSetpoint::test_ambient_temperature_passed_through PASSED                       [ 84%]
+tests/test_simulator.py::TestTimezoneValidation::test_rejects_naive_timestamp PASSED                                   [ 92%]
+tests/test_simulator.py::TestTimezoneValidation::test_rejects_non_utc_timezone PASSED                                  [100%]
+
+========================================================= FAILURES ==========================================================
+______________________________________ TestBoilerOnOff.test_boiler_cycles_predictably _______________________________________
+
+self = <test_simulator.TestBoilerOnOff object at 0x000001842C37B810>
+boiler_config = {'steady_state': {'supply_temperature': 65.0, 'return_temperature': 55.0, 'ambient_baseline': 20.0}, 'dynamics': {'hea...duty_cycle': {'operating_hours_start': 6, 'operating_hours_end': 22, 'cycle_period_seconds': 1200, 'on_fraction': 0.5}}
+
+    def test_boiler_cycles_predictably(self, boiler_config):
+        # Multiple points through one 20-min cycle
+        times_and_expected_power = [
+            (_timestamp(6, 5), 5.0),   # 5 min: on
+            (_timestamp(6, 10), 5.0),  # 10 min: on
+            (_timestamp(6, 11), 0.0),  # 11 min: off
+            (_timestamp(6, 20), 0.0),  # 20 min: off
+            (_timestamp(6, 21), 5.0),  # 21 min: cycle repeats, on
+        ]
+    
+        for ts, expected_power in times_and_expected_power:
+            result = simulate(boiler_config, ts, 15.0)
+>           assert result["power_draw_kw"] == expected_power
+E           assert 0.0 == 5.0
+
+tests\test_simulator.py:88: AssertionError
+================================================== short test summary info ==================================================
+FAILED tests/test_simulator.py::TestBoilerOnOff::test_boiler_cycles_predictably - assert 0.0 == 5.0
+=============================================== 1 failed, 12 passed in 0.26s ===============================================
