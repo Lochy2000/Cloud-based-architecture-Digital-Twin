@@ -133,3 +133,8 @@ def connect(client: mqtt.Client, config: BrokerConfig, timeout: float = 10.0) ->
         )
 
     client.on_connect = original_on_connect
+
+def disconnect(client: mqtt.Client) -> None:
+    """ runs a clean shutdown, stops the network loop after the DISCONNECT is sent."""
+    client.disconnect()
+    client.loop_stop()
