@@ -16,3 +16,50 @@ import paho.mqtt.client as mqtt
 
 from twin.config import BrokerConfig
 from twin.logging_setup import setup_logging
+
+# Reconnect backoff bounds, seconds. paho doubles the delay on each failed
+# attempt between these values.
+RECONNECT_MIN_DELAY = 1
+RECONNECT_MAX_DELAY = 32
+
+class MQTTClientError(Exception):
+    """Raised when a client cannot be constructed or the initial connect fails."""
+
+
+def build_client(config: BrokerConfig, client_id: str, component: str) -> mqtt.Client:
+    """
+    construct a configured, not-yet-connected clien
+
+    client_id must be unique per connection. AWS IoT Core disconnects an
+    existing session when a second client presents the same ID, so the
+    publisher and storage_writer must not share one
+    """
+    logger = setup_logging(component)
+
+    client = mqtt.Client(
+        callback_api_version=mqtt.CallbackAPIVersion.VERSION2,
+        client_id=client_id,
+        protocol=mqtt.MQTTv311,
+        clean_session=False if config.qos > 0 else True,
+    )
+
+    if config.auth_mode == "password":
+        client.username_pw_set(config.username, config.password)
+        if config.tls:
+            client.tls_set(tls_version=ssl.PROTOCOL_TLSv1_2)
+    else:
+        client.tls_set(
+            ca_certs=config.ca_cert,
+            certfile=config.client_cert,
+            keyfile=config.client_key,
+            tls_version=ssl.PROTOCOL_TLSv1_2,
+        )
+
+    client.reconnect_delay_set(
+        min_delay=RECONNECT_MIN_DELAY,
+        max_delay=RECONNECT_MAX_DELAY,
+    )
+
+    _attach_logging_callbacks(client, logger, component)
+
+    return client
