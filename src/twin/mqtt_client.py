@@ -63,3 +63,26 @@ def build_client(config: BrokerConfig, client_id: str, component: str) -> mqtt.C
     _attach_logging_callbacks(client, logger, component)
 
     return client
+
+def _attach_logging_callbacks(client: mqtt.Client, logger, component: str) -> None:
+    """
+    connection lifecycle events are logged with structured fields so
+    fault-injection trials can extract detection and recovery times by
+    parsing the log rather than by manual observation.
+    """
+
+    def on_connect(client, userdata, flags, reason_code, properties):
+        if reason_code == 0:
+            logger.info(
+                "broker connected",
+                extra={"event": "connected", "component": component},
+            )
+        else:
+            logger.error(
+                "broker connection refused",
+                extra={
+                    "event": "connect_refused",
+                    "reason_code": int(reason_code),
+                    "component": component,
+                },
+            )
