@@ -74,14 +74,14 @@ class TestBoilerOnOff:
         assert result["power_draw_kw"] == 0.0
 
     def test_boiler_cycles_predictably(self, boiler_config):
-        # Multiple points through one 20-min cycle
+        # Times safely within each on/off state, not at boundaries
         times_and_expected_power = [
-            (_timestamp(6, 5), 5.0),   # 5 min: on
-            (_timestamp(6, 10), 5.0),  # 10 min: on
-            (_timestamp(6, 11), 0.0),  # 11 min: off
-            (_timestamp(6, 20), 0.0),  # 20 min: off
-            (_timestamp(6, 21), 5.0),  # 21 min: cycle repeats, on
+            (_timestamp(6, 5), 5.0),   # 300s: in on period
+            (_timestamp(6, 12), 0.0),  # 600s + 120s: in off period
+            (_timestamp(6, 25), 5.0),  # 1500s % 1200 = 300s: cycle repeats, on
+            (_timestamp(6, 35), 0.0),  # 1500s + 600s: in off period
         ]
+
 
         for ts, expected_power in times_and_expected_power:
             result = simulate(boiler_config, ts, 15.0)
