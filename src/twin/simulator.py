@@ -27,3 +27,22 @@ def simulate(asset_config: dict, timestamp: datetime, ambient_temperature: float
     op_end = asset_config["duty_cycle"]["operating_hours_end"]
     cycle_period = asset_config["duty_cycle"]["cycle_period_seconds"]
     on_fraction = asset_config["duty_cycle"]["on_fraction"]
+
+      # Outside operating window: at ambient
+    hour_of_day = timestamp.hour
+    if not (op_start <= hour_of_day < op_end):
+        return {
+            "supply_temperature_c": ambient_baseline,
+            "return_temperature_c": ambient_baseline,
+            "ambient_temperature_c": ambient_temperature,
+            "power_draw_kw": 0.0,
+            "setpoint_c": supply_setpoint,
+        }
+    
+    # Time into operating window (seconds from start hour)
+    seconds_into_window = (timestamp.hour - op_start) * 3600 + timestamp.minute * 60 + timestamp.second
+    
+    # Current position in duty cycle
+    cycle_position = seconds_into_window % cycle_period
+    on_duration = cycle_period * on_fraction
+    boiler_on = cycle_position < on_duration
