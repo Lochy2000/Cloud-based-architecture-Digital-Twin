@@ -61,6 +61,16 @@ def _require_existing_file(name: str) -> str:
         raise ConfigError(f"{name}={path!r} does not point to an existing file")
     return path
 
+def _require_qos(name: str) -> int:
+    raw = _require(name)
+    try:
+        value = int(raw)
+    except ValueError:
+        raise ConfigError(f"Environment variable {name}={raw!r} is not a valid integer")
+    if value not in (0, 1, 2):
+        raise ConfigError(f"{name}={value} must be 0, 1 or 2")
+    return value
+
 
 def _optional(name: str, default: str) -> str:
     return os.environ.get(name, default)
@@ -79,6 +89,7 @@ class BrokerConfig:
     client_cert: Optional[str]
     client_key: Optional[str]
     keepalive: int
+    qos: int
 
 
 def load_broker_config() -> BrokerConfig:
@@ -116,12 +127,13 @@ def load_broker_config() -> BrokerConfig:
         client_key = _require_existing_file("BROKER_CLIENT_KEY")
 
     keepalive = int(_optional("BROKER_KEEPALIVE", "60"))
+    qos = _require_qos("MQTT_QOS")
 
     return BrokerConfig(
         host=host, port=port, tls=tls, auth_mode=auth_mode,
         username=username, password=password,
         ca_cert=ca_cert, client_cert=client_cert, client_key=client_key,
-        keepalive=keepalive,
+        keepalive=keepalive, qos=qos,
     )
 
 # --- InfluxDB config ------------------------------------------------------
@@ -132,16 +144,6 @@ class InfluxConfig:
     token: str
     org: str
     bucket: str
-
-def _require_qos(name: str) -> int:
-    raw = _require(name)
-    try:
-        value = int(raw)
-    except ValueError:
-        raise ConfigError(f"Environment variable {name}={raw!r} is not a valid integer")
-    if value not in (0, 1, 2):
-        raise ConfigError(f"{name}={value} must be 0, 1 or 2")
-    return value
 
 def load_influx_config() -> InfluxConfig:
     """Needed only by storage_writer.py and the M1.6 payload-capture utility."""
