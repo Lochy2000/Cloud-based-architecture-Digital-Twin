@@ -19,7 +19,7 @@ ALL_CONFIG_VARS = [
     "BROKER_HOST", "BROKER_PORT", "BROKER_TLS", "BROKER_AUTH_MODE",
     "BROKER_USERNAME", "BROKER_PASSWORD",
     "BROKER_CA_CERT", "BROKER_CLIENT_CERT", "BROKER_CLIENT_KEY",
-    "BROKER_KEEPALIVE",
+    "BROKER_KEEPALIVE", "MQTT_QOS",
     "INFLUX_URL", "INFLUX_TOKEN", "INFLUX_ORG", "INFLUX_BUCKET",
     "ASSET_CONFIG_PATH", "PUBLISH_INTERVAL_SECONDS",
 ]
@@ -48,6 +48,7 @@ class TestLoadBrokerConfig:
         monkeypatch.setenv("BROKER_AUTH_MODE", "password")
         monkeypatch.setenv("BROKER_USERNAME", "twin-publisher")
         monkeypatch.setenv("BROKER_PASSWORD", "secret")
+        monkeypatch.setenv("MQTT_QOS", "1") 
 
         cfg = load_broker_config()
 
@@ -59,6 +60,7 @@ class TestLoadBrokerConfig:
         assert cfg.password == "secret"
         assert cfg.ca_cert is None
         assert cfg.keepalive == 60  # default, not set above
+        assert cfg.qos == 1    
 
     def test_cert_auth_success(self, monkeypatch, tmp_path):
         ca = tmp_path / "ca.pem"
@@ -74,6 +76,7 @@ class TestLoadBrokerConfig:
         monkeypatch.setenv("BROKER_CA_CERT", str(ca))
         monkeypatch.setenv("BROKER_CLIENT_CERT", str(cert))
         monkeypatch.setenv("BROKER_CLIENT_KEY", str(key))
+        monkeypatch.setenv("MQTT_QOS", "1")
 
         cfg = load_broker_config()
 
