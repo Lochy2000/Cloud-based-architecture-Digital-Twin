@@ -1,0 +1,31 @@
+# parameters in this schema:
+# - Supply/return temperatures, operating envelope: Energy Systems Catapult (2024),
+#   Electrification of Heat Demonstration Project: Heat Pump Performance Data Analysis Report
+# - Heating time constants (valve, coil, sensor): US Patent 9612030 (Automated Time Constant
+#   Determination for Control Devices)
+# - Supply/return delta, condensing boiler guidance: Cleaver-Brooks Technical Documentation,
+#   "An Introduction to Condensing Boilers"
+# - duty cycle periods (HVAC on/off cycling): HVAC-Talk forum discussions on thermostat cycle
+#   time and heating system response, and combined evidence from building control systems
+# - Cooling time constant: standard heating engineering practice for thermal mass dissipation
+
+asset_id: boiler_01
+asset_type: thermal_system
+
+# temperatures in °C when boiler is on
+steady_state:
+  supply_temperature: 65.0
+  return_temperature: 55.0
+  ambient_baseline: 20.0
+
+# time constants in seconds for heating/cooling response
+dynamics:
+  heating_time_constant_seconds: 25
+  cooling_time_constant_seconds: 600
+
+# operating schedule and on/off pattern
+duty_cycle:
+  operating_hours_start: 6
+  operating_hours_end: 22
+  cycle_period_seconds: 1200
+  on_fraction: 0.5
