@@ -22,3 +22,12 @@ from twin.logging_setup import setup_logging
 from twin.mqtt_client import build_client, connect, disconnect
 from twin.payload import build_payload, serialize
 from twin.simulator import simulate
+
+COMPONENT = "publisher"
+
+# external air temperature. Held constant in the base case: the framework
+# states cost and complexity measures are insensitive to telemetry realism,
+# and a varying ambient would add a second source of variation between runs.
+AMBIENT_TEMPERATURE_C = 12.0
+
+_shutdown_requested = False
