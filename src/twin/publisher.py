@@ -31,3 +31,13 @@ COMPONENT = "publisher"
 AMBIENT_TEMPERATURE_C = 12.0
 
 _shutdown_requested = False
+
+def _handle_shutdown(signum, frame):
+    """
+    without this the process is killed
+    outright, the client never sends DISCONNECT, and the broker records an
+    unexpected drop; indistinguishable from the failures fault injection is
+    meant to produce.
+    """
+    global _shutdown_requested
+    _shutdown_requested = True
