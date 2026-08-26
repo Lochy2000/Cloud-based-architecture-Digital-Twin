@@ -99,6 +99,9 @@ def _attach_logging_callbacks(client: mqtt.Client, logger, component: str) -> No
                 "component": component,
             },
         )
+    client.on_connect = on_connect
+    client.on_disconnect = on_disconnect
+
 def connect(client: mqtt.Client, config: BrokerConfig, timeout: float = 10.0) -> None:
     """
     connect and start the network loop in a background thread.

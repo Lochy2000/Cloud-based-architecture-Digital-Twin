@@ -126,6 +126,28 @@ class TestLoadBrokerConfig:
         with pytest.raises(ConfigError, match="BROKER_CA_CERT"):
             load_broker_config()
 
+    def test_missing_qos_names_the_variable(self, monkeypatch):
+        monkeypatch.setenv("BROKER_HOST", "test")
+        monkeypatch.setenv("BROKER_PORT", "8883")
+        monkeypatch.setenv("BROKER_TLS", "true")
+        monkeypatch.setenv("BROKER_AUTH_MODE", "password")
+        monkeypatch.setenv("BROKER_USERNAME", "x")
+        monkeypatch.setenv("BROKER_PASSWORD", "x")
+
+        with pytest.raises(ConfigError, match="MQTT_QOS"):
+            load_broker_config()
+
+    def test_invalid_qos_rejected(self, monkeypatch):
+        monkeypatch.setenv("BROKER_HOST", "test")
+        monkeypatch.setenv("BROKER_PORT", "8883")
+        monkeypatch.setenv("BROKER_TLS", "true")
+        monkeypatch.setenv("BROKER_AUTH_MODE", "password")
+        monkeypatch.setenv("BROKER_USERNAME", "x")
+        monkeypatch.setenv("BROKER_PASSWORD", "x")
+        monkeypatch.setenv("MQTT_QOS", "3")
+
+        with pytest.raises(ConfigError, match="MQTT_QOS"):
+            load_broker_config()
 
 # --- load_influx_config ----------------------------------------------
 
