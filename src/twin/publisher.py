@@ -16,7 +16,7 @@ import sys
 import time
 from datetime import datetime, timezone
 
-from twin.asset import load_asset
+from twin.assets import load_asset
 from twin.config import load_broker_config, load_workload_config
 from twin.logging_setup import setup_logging
 from twin.mqtt_client import build_client, connect, disconnect

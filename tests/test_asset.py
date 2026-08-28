@@ -8,7 +8,7 @@ producing wrong readings silently.
 
 import pytest
 
-from twin.asset import AssetError, load_asset
+from twin.assets import AssetError, load_asset
 
 VALID_YAML = """
 asset_id: boiler_01
