@@ -35,3 +35,25 @@ def _handle_shutdown(signum, frame):
 
 def topic_for(asset_id: str) -> str:
     return f"twin/{asset_id}/telemetry"
+
+def to_point(payload: TelemetryPayload) -> Point:
+    """
+    a validated payload onto an InfluxDB point.
+
+    asset_id is a tag (indexed, used for filtering); the five channels are
+    fields (the measured values). sequence is a field rather than a tag: it is
+    unique per message, and a tag with unbounded cardinality would degrade
+    InfluxDB performance badly.
+
+    The timestamp comes from the payload, not from arrival time, so a message
+    redelivered after a broker outage is stored at the instant it was measured.
+    """
+    point = (
+        Point(MEASUREMENT)
+        .tag("asset_id", payload.asset_id)
+        .field("sequence", payload.sequence)
+        .time(payload.timestamp, WritePrecision.MS)
+    )
+    for channel in CHANNELS:
+        point = point.field(channel, float(getattr(payload, channel)))
+    return point
