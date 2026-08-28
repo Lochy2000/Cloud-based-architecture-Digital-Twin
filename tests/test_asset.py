@@ -56,3 +56,28 @@ class TestValidAsset:
         readings = simulate(asset, datetime(2026, 8, 20, 6, 5, tzinfo=timezone.utc), 12.0)
 
         assert readings["power_draw_kw"] == 5.0
+
+class TestMissingFields:
+
+    def test_missing_asset_id(self, tmp_path):
+        text = VALID_YAML.replace("asset_id: boiler_01\n", "")
+        with pytest.raises(AssetError, match="asset_id"):
+            load_asset(_write(tmp_path, text))
+
+    def test_missing_section(self, tmp_path):
+        text = VALID_YAML.split("dynamics:")[0]
+        with pytest.raises(AssetError, match="dynamics"):
+            load_asset(_write(tmp_path, text))
+
+    def test_missing_field_names_section_and_field(self, tmp_path):
+        text = VALID_YAML.replace("  cooling_time_constant_seconds: 600\n", "")
+        with pytest.raises(AssetError, match=r"dynamics\.cooling_time_constant_seconds"):
+            load_asset(_write(tmp_path, text))
+
+    def test_section_that_is_not_a_mapping(self, tmp_path):
+        text = VALID_YAML.replace(
+            "dynamics:\n  heating_time_constant_seconds: 25\n  cooling_time_constant_seconds: 600\n",
+            "dynamics: not-a-mapping\n",
+        )
+        with pytest.raises(AssetError, match="dynamics"):
+            load_asset(_write(tmp_path, text))
