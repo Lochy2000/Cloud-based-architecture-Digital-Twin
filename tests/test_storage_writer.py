@@ -32,3 +32,8 @@ def _payload(sequence=0, asset_id="boiler_01"):
 def _raw(sequence=0, asset_id="boiler_01"):
     return serialize(_payload(sequence, asset_id))
 
+class TestTopic:
+
+    def test_matches_publisher_topic(self):
+        # Must agree with publisher.topic_for or nothing is ever received.
+        assert topic_for("boiler_01") == "twin/boiler_01/telemetry"
