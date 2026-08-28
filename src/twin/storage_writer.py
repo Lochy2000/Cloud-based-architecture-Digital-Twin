@@ -84,3 +84,44 @@ class SequenceTracker:
             return 0
         return sequence - previous - 1
 
+ef run() -> int:
+    logger = setup_logging(COMPONENT)
+
+    signal.signal(signal.SIGTERM, _handle_shutdown)
+    signal.signal(signal.SIGINT, _handle_shutdown)
+
+    broker_config = load_broker_config()
+    influx_config = load_influx_config()
+
+    asset_id = os.environ.get("ASSET_ID", "boiler_01")
+    topic = topic_for(asset_id)
+
+    influx = InfluxDBClient(
+        url=influx_config.url, token=influx_config.token, org=influx_config.org
+    )
+    write_api = influx.write_api(write_options=SYNCHRONOUS)
+
+    tracker = SequenceTracker()
+    client_id = os.environ.get("MQTT_CLIENT_ID", f"twin-storage-{asset_id}")
+    client = build_client(broker_config, client_id, COMPONENT)
+
+    def on_message(client, userdata, message):
+        handle_message(message.payload, write_api, influx_config.bucket, tracker, logger)
+
+    client.on_message = on_message
+
+    connect(client, broker_config)
+    client.subscribe(topic, qos=broker_config.qos)
+
+    logger.info(
+        "storage writer started",
+        extra={"event": "started", "topic": topic, "bucket": influx_config.bucket,
+               "qos": broker_config.qos},
+    )
+
+    _shutdown_requested.wait()
+
+    logger.info("storage writer stopping", extra={"event": "stopping"})
+    disconnect(client)
+    influx.close()
+    return 0
