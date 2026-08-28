@@ -98,3 +98,17 @@ class TestInvalidValues:
         text = VALID_YAML.replace("operating_hours_start: 6", "operating_hours_start: 23")
         with pytest.raises(AssetError, match="operating hours"):
             load_asset(_write(tmp_path, text))
+
+class TestFileProblems:
+
+    def test_missing_file(self):
+        with pytest.raises(AssetError, match="could not read"):
+            load_asset("/nonexistent/boiler.yaml")
+
+    def test_invalid_yaml(self, tmp_path):
+        with pytest.raises(AssetError, match="not valid YAML"):
+            load_asset(_write(tmp_path, "asset_id: [unclosed\n"))
+
+    def test_yaml_that_is_not_a_mapping(self, tmp_path):
+        with pytest.raises(AssetError, match="must be a YAML mapping"):
+            load_asset(_write(tmp_path, "- one\n- two\n"))
