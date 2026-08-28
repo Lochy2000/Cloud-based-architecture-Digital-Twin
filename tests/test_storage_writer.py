@@ -97,3 +97,67 @@ class TestSequenceTracker:
         tracker = SequenceTracker()
         tracker.check("boiler_01", 100)
         assert tracker.check("chiller_02", 0) == 0
+
+
+class TestHandleMessage:
+
+    def test_valid_message_is_written(self):
+        write_api = MagicMock()
+        stored = handle_message(_raw(), write_api, "telemetry", SequenceTracker(), MagicMock())
+
+        assert stored is True
+        write_api.write.assert_called_once()
+        assert write_api.write.call_args.kwargs["bucket"] == "telemetry"
+
+    def test_malformed_payload_is_discarded_without_raising(self):
+        write_api = MagicMock()
+        logger = MagicMock()
+
+        stored = handle_message(b"not json", write_api, "telemetry", SequenceTracker(), logger)
+
+        assert stored is False
+        write_api.write.assert_not_called()
+        logger.error.assert_called_once()
+
+    def test_wrong_schema_version_is_discarded(self):
+        write_api = MagicMock()
+        raw = _raw().replace(b'"1.0"', b'"2.0"')
+
+        stored = handle_message(raw, write_api, "telemetry", SequenceTracker(), MagicMock())
+
+        assert stored is False
+        write_api.write.assert_not_called()
+
+    def test_influx_failure_does_not_raise(self):
+        # An exception escaping the MQTT callback kills the network loop thread,
+        # which during a trial would be indistinguishable from broker failure.
+        write_api = MagicMock()
+        write_api.write.side_effect = Exception("connection refused")
+        logger = MagicMock()
+
+        stored = handle_message(_raw(), write_api, "telemetry", SequenceTracker(), logger)
+
+        assert stored is False
+        logger.error.assert_called_once()
+
+    def test_sequence_gap_is_logged(self):
+        write_api = MagicMock()
+        logger = MagicMock()
+        tracker = SequenceTracker()
+
+        handle_message(_raw(sequence=0), write_api, "telemetry", tracker, logger)
+        handle_message(_raw(sequence=5), write_api, "telemetry", tracker, logger)
+
+        logger.warning.assert_called_once()
+        assert logger.warning.call_args.kwargs["extra"]["messages_missing"] == 4
+
+    def test_gap_does_not_prevent_storage(self):
+        # A gap is a finding, not a reason to discard the message that revealed it.
+        write_api = MagicMock()
+        tracker = SequenceTracker()
+
+        handle_message(_raw(sequence=0), write_api, "telemetry", tracker, MagicMock())
+        stored = handle_message(_raw(sequence=9), write_api, "telemetry", tracker, MagicMock())
+
+        assert stored is True
+        assert write_api.write.call_count == 2
