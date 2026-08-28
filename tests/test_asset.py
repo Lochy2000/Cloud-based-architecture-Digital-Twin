@@ -35,3 +35,24 @@ def _write(tmp_path, text, name="boiler_01.yaml"):
     path = tmp_path / name
     path.write_text(text, encoding="utf-8")
     return str(path)
+
+class TestValidAsset:
+
+    def test_loads_all_sections(self, tmp_path):
+        asset = load_asset(_write(tmp_path, VALID_YAML))
+
+        assert asset["asset_id"] == "boiler_01"
+        assert asset["steady_state"]["supply_temperature"] == 65.0
+        assert asset["dynamics"]["cooling_time_constant_seconds"] == 600
+        assert asset["duty_cycle"]["on_fraction"] == 0.5
+
+    def test_output_is_accepted_by_simulator(self, tmp_path):
+        # The contract that actually matters: what load_asset returns must be
+        # directly usable by simulate() without reshaping.
+        from datetime import datetime, timezone
+        from twin.simulator import simulate
+
+        asset = load_asset(_write(tmp_path, VALID_YAML))
+        readings = simulate(asset, datetime(2026, 8, 20, 6, 5, tzinfo=timezone.utc), 12.0)
+
+        assert readings["power_draw_kw"] == 5.0
