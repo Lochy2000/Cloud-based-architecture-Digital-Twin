@@ -81,3 +81,20 @@ class TestMissingFields:
         )
         with pytest.raises(AssetError, match="dynamics"):
             load_asset(_write(tmp_path, text))
+
+class TestInvalidValues:
+
+    def test_on_fraction_above_one(self, tmp_path):
+        text = VALID_YAML.replace("on_fraction: 0.5", "on_fraction: 1.5")
+        with pytest.raises(AssetError, match="on_fraction"):
+            load_asset(_write(tmp_path, text))
+
+    def test_on_fraction_zero(self, tmp_path):
+        text = VALID_YAML.replace("on_fraction: 0.5", "on_fraction: 0")
+        with pytest.raises(AssetError, match="on_fraction"):
+            load_asset(_write(tmp_path, text))
+
+    def test_operating_hours_reversed(self, tmp_path):
+        text = VALID_YAML.replace("operating_hours_start: 6", "operating_hours_start: 23")
+        with pytest.raises(AssetError, match="operating hours"):
+            load_asset(_write(tmp_path, text))
