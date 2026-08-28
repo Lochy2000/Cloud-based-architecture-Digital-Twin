@@ -45,6 +45,17 @@ def _handle_shutdown(signum, frame):
 def topic_for(asset_id: str) -> str:
     return f"twin/{asset_id}/telemetry"
 
+def next_tick_delay(start: float, sequence: int, interval: float, now: float) -> float:
+    """
+    seconds to wait before publishing message number `sequence`.
+
+    targets are absolute offsets from a fixed origin, so per-tick work never
+    accumulates into drift
+    negative result means the tick was missed;
+    the nominal message count was not met, which matters because message
+    count is a cost-model input
+    """
+    return start + (sequence * interval) - now
 
 def run() -> int:
     logger = setup_logging(COMPONENT)
@@ -102,8 +113,9 @@ def run() -> int:
         sequence += 1
 
         # next tick is measured from the fixed start point, not from now
-        next_tick = start + (sequence * interval)
-        remaining = next_tick - time.monotonic()
+        # next_tick = start + (sequence * interval)
+        # remaining = next_tick - time.monotonic()
+        remaining = next_tick_delay(start, sequence, interval, time.monotonic())
 
         if remaining < 0:
             #  tick was missed entirely; record it rather than silently
