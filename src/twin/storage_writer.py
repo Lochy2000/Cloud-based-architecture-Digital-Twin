@@ -57,3 +57,30 @@ def to_point(payload: TelemetryPayload) -> Point:
     for channel in CHANNELS:
         point = point.field(channel, float(getattr(payload, channel)))
     return point
+
+class SequenceTracker:
+    """
+    tracks the last sequence number seen per asset and reports gaps.
+
+    A gap means messages were lost in transit. Under QoS 1 this should be rare
+    and is itself a finding; under QoS 0 it is the expected outcome of a broker
+    outage and is the measurement.
+    """
+
+    def __init__(self):
+        self._last = {}
+
+    def check(self, asset_id: str, sequence: int) -> int:
+        """
+        returns the number of messages missing before this one. Zero means
+        contiguous, or that this is the first message seen for the asset.
+        """
+        previous = self._last.get(asset_id)
+        self._last[asset_id] = sequence
+
+        if previous is None or sequence <= previous:
+            # A lower or repeated sequence means the publisher restarted, or
+            # the broker redelivered. Neither is a gap.
+            return 0
+        return sequence - previous - 1
+
