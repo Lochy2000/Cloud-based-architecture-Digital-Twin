@@ -84,7 +84,7 @@ class SequenceTracker:
             return 0
         return sequence - previous - 1
 
-ef run() -> int:
+def run() -> int:
     logger = setup_logging(COMPONENT)
 
     signal.signal(signal.SIGTERM, _handle_shutdown)
@@ -125,3 +125,43 @@ ef run() -> int:
     disconnect(client)
     influx.close()
     return 0
+
+def handle_message(raw: bytes, write_api, bucket: str, tracker: SequenceTracker, logger) -> bool:
+    """
+    process one received message. will return True if it was stored.
+
+    Never raises: an exception escaping an MQTT callback kills the network loop
+    thread silently, which would look like a broker failure during a trial and
+    corrupt the measurement.
+    """
+    try:
+        payload = parse(raw)
+    except PayloadError as exc:
+        logger.error("malformed payload discarded", extra={"event": "payload_rejected", "error": str(exc)})
+        return False
+
+    missing = tracker.check(payload.asset_id, payload.sequence)
+    if missing:
+        logger.warning(
+            "sequence gap detected",
+            extra={"event": "sequence_gap", "asset_id": payload.asset_id,
+                   "sequence": payload.sequence, "messages_missing": missing},
+        )
+
+    try:
+        write_api.write(bucket=bucket, record=to_point(payload))
+    except Exception as exc:
+        # InfluxDB being unreachable is a fault-injection mode in its own right.
+        # message is lost, but the subscriber must keep running so recovery
+        # is observable once storage returns
+        logger.error(
+            "influx write failed",
+            extra={"event": "write_failed", "sequence": payload.sequence, "error": str(exc)},
+        )
+        return False
+
+    return True
+
+
+if __name__ == "__main__":
+    sys.exit(run())
