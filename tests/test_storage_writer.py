@@ -60,3 +60,40 @@ class TestToPoint:
         # 2026-08-20T14:03:22.123Z in milliseconds.
         line = to_point(_payload()).to_line_protocol()
         assert line.endswith("1787234602123")
+
+class TestSequenceTracker:
+
+    def test_first_message_is_never_a_gap(self):
+        assert SequenceTracker().check("boiler_01", 0) == 0
+
+    def test_contiguous_messages_report_no_gap(self):
+        tracker = SequenceTracker()
+        tracker.check("boiler_01", 0)
+        assert tracker.check("boiler_01", 1) == 0
+
+    def test_single_missing_message_reported(self):
+        tracker = SequenceTracker()
+        tracker.check("boiler_01", 0)
+        assert tracker.check("boiler_01", 2) == 1
+
+    def test_multiple_missing_messages_counted(self):
+        tracker = SequenceTracker()
+        tracker.check("boiler_01", 10)
+        assert tracker.check("boiler_01", 25) == 14
+
+    def test_publisher_restart_is_not_counted_as_a_gap(self):
+        # Sequence restarts at 0 when the publisher process restarts.
+        tracker = SequenceTracker()
+        tracker.check("boiler_01", 500)
+        assert tracker.check("boiler_01", 0) == 0
+
+    def test_redelivered_message_is_not_a_gap(self):
+        # QoS 1 can redeliver a message already seen.
+        tracker = SequenceTracker()
+        tracker.check("boiler_01", 5)
+        assert tracker.check("boiler_01", 5) == 0
+
+    def test_assets_are_tracked_independently(self):
+        tracker = SequenceTracker()
+        tracker.check("boiler_01", 100)
+        assert tracker.check("chiller_02", 0) == 0
