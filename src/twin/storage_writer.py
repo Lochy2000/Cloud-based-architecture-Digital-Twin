@@ -22,3 +22,16 @@ from twin.config import load_broker_config, load_influx_config
 from twin.logging_setup import setup_logging
 from twin.mqtt_client import build_client, connect, disconnect
 from twin.payload import CHANNELS, PayloadError, TelemetryPayload, parse
+
+COMPONENT = "storage_writer"
+MEASUREMENT = "telemetry"
+
+_shutdown_requested = threading.Event()
+
+
+def _handle_shutdown(signum, frame):
+    _shutdown_requested.set()
+
+
+def topic_for(asset_id: str) -> str:
+    return f"twin/{asset_id}/telemetry"
