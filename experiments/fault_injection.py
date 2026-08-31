@@ -161,3 +161,11 @@ def run_trial(configuration: str, mode: str, trial: int, outage: float, settle: 
         "manual_actions": manual_actions,
         "notes": "" if detected else "no detection event found in logs",
     }
+
+def append_row(row: dict) -> None:
+    exists = OUTPUT_PATH.exists()
+    with OUTPUT_PATH.open("a", newline="", encoding="utf-8") as handle:
+        writer = csv.DictWriter(handle, fieldnames=FIELDNAMES)
+        if not exists:
+            writer.writeheader()
+        writer.writerow(row)
