@@ -10,7 +10,7 @@ providers:
     type: file
     disableDeletion: true
     updateIntervalSeconds: 30
-    allowUiUpdates: false
+    allowUiUpdates: false # do not want browser edits to survive a re - deploy.
     options:
       path: /var/lib/grafana/dashboards
       foldersFromFilesStructure: false
