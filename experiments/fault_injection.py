@@ -42,3 +42,11 @@ def run(command: list[str], check: bool = True) -> subprocess.CompletedProcess:
 
 def compose(*args: str, check: bool = True) -> subprocess.CompletedProcess:
     return run(["docker", "compose", *args], check=check)
+
+def container_id(service: str) -> str:
+    result = compose("ps", "-q", service)
+    cid = result.stdout.strip()
+    if not cid:
+        raise RuntimeError(f"service {service!r} is not running")
+    return cid
+
