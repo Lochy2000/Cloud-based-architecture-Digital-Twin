@@ -1,0 +1,6 @@
+# run with 
+#docker compose -f docker-compose.yml -f docker-compose.faults.yml up
+services:
+  publisher:
+    cap_add:
+      - NET_ADMIN
