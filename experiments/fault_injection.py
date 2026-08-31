@@ -50,3 +50,16 @@ def container_id(service: str) -> str:
         raise RuntimeError(f"service {service!r} is not running")
     return cid
 
+def logs_since(service: str, since: str) -> list[dict]:
+    """Structured log lines emitted by a service since a timestamp."""
+    result = compose("logs", "--since", since, "--no-log-prefix", service, check=False)
+    entries = []
+    for line in result.stdout.splitlines():
+        line = line.strip()
+        if not line.startswith("{"):
+            continue
+        try:
+            entries.append(json.loads(line))
+        except json.JSONDecodeError:
+            continue
+    return entries
