@@ -36,3 +36,6 @@ PUBLISHER_SERVICE = "publisher"
 STORAGE_SERVICE = "storage-writer"
 INFLUX_SERVICE = "influxdb"
 BROKER_SERVICE = "mosquitto"
+
+def run(command: list[str], check: bool = True) -> subprocess.CompletedProcess:
+    return subprocess.run(command, capture_output=True, text=True, check=check)
