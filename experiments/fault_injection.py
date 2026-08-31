@@ -63,3 +63,9 @@ def logs_since(service: str, since: str) -> list[dict]:
         except json.JSONDecodeError:
             continue
     return entries
+
+def first_event_time(entries: list[dict], events: set[str]) -> datetime | None:
+    for entry in entries:
+        if entry.get("event") in events:
+            return datetime.fromisoformat(entry["timestamp"])
+    return None
