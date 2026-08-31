@@ -87,4 +87,9 @@ def sever_network(service: str) -> None:
 def restore_network(service: str) -> None:
     run(["docker", "exec", "--privileged", container_id(service),
         "iptables", "-D", "OUTPUT", "-p", "tcp", "--dport", "8883", "-j", "DROP"])
-    
+
+def stop_service(service: str) -> None:
+    compose("stop", service)
+
+def start_service(service: str) -> None:
+    compose("start", service)
