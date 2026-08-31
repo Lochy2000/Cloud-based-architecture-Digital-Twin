@@ -169,3 +169,37 @@ def append_row(row: dict) -> None:
         if not exists:
             writer.writeheader()
         writer.writerow(row)
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description="Run fault injection trials.")
+    parser.add_argument("--configuration", required=True, choices=["c1", "c2a", "c2b"])
+    parser.add_argument("--mode", choices=["broker", "network", "storage", "all"], default="all")
+    parser.add_argument("--trials", type=int, default=3)
+    parser.add_argument("--outage", type=float, default=60.0,
+                        help="seconds the failure is held")
+    parser.add_argument("--settle", type=float, default=90.0,
+                        help="seconds to wait after restoring before reading logs")
+    parser.add_argument("--gap", type=float, default=120.0,
+                        help="seconds between trials, so one does not affect the next")
+    args = parser.parse_args()
+
+    modes = ["broker", "network", "storage"] if args.mode == "all" else [args.mode]
+
+    for mode in modes:
+        for trial in range(1, args.trials + 1):
+            print(f"[{args.configuration}] {mode} trial {trial}/{args.trials}", flush=True)
+            row = run_trial(args.configuration, mode, trial, args.outage, args.settle)
+            append_row(row)
+            print(f"  detection={row['detection_seconds']}s "
+                f"recovery={row['recovery_seconds']}s "
+                f"lost={row['messages_lost']}", flush=True)
+
+            if not (mode == modes[-1] and trial == args.trials):
+                time.sleep(args.gap)
+
+    print(f"\nWritten to {OUTPUT_PATH}")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
