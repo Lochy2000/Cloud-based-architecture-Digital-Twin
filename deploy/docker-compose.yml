@@ -84,3 +84,8 @@ services:
       influxdb:
         condition: service_healthy
     restart: unless-stopped
+
+volumes:
+  mosquitto-data:
+  influxdb-data:
+  grafana-data:
