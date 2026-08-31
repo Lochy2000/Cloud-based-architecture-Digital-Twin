@@ -52,3 +52,18 @@ services:
       influxdb:
         condition: service_healthy
     restart: unless-stopped
+
+  publisher:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+    command: ["python", "-m", "twin.publisher"]
+    env_file:
+      - ${ENV_FILE:-../config/env/c1.env}
+    environment:
+      MQTT_CLIENT_ID: twin-publisher-boiler_01
+      ASSET_CONFIG_PATH: /app/config/assets/boiler_01.yaml
+    volumes:
+      - ../config/assets:/app/config/assets:ro
+      - ./mosquitto/certs:/certs:ro
+    restart: unless-stopped
