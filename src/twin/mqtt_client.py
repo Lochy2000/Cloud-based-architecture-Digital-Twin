@@ -46,7 +46,7 @@ def build_client(config: BrokerConfig, client_id: str, component: str) -> mqtt.C
     if config.auth_mode == "password":
         client.username_pw_set(config.username, config.password)
         if config.tls:
-            client.tls_set(tls_version=ssl.PROTOCOL_TLSv1_2)
+            client.tls_set(ca_certs=config.ca_cert, tls_version=ssl.PROTOCOL_TLSv1_2)
     else:
         client.tls_set(
             ca_certs=config.ca_cert,
