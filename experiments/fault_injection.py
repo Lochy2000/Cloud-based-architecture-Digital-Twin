@@ -69,3 +69,6 @@ def first_event_time(entries: list[dict], events: set[str]) -> datetime | None:
         if entry.get("event") in events:
             return datetime.fromisoformat(entry["timestamp"])
     return None
+
+def total_missing(entries: list[dict]) -> int:
+    return sum(e.get("messages_missing", 0) for e in entries if e.get("event") == "sequence_gap")
