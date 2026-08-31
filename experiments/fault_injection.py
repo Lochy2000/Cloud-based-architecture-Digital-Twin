@@ -93,3 +93,71 @@ def stop_service(service: str) -> None:
 
 def start_service(service: str) -> None:
     compose("start", service)
+
+
+#----- run script --------------------------------------------------
+
+def run_trial(configuration: str, mode: str, trial: int, outage: float, settle: float) -> dict:
+    started_at = datetime.now(timezone.utc)
+    since = started_at.isoformat()
+
+    if mode == "broker":
+        if configuration == "c1":
+            stop_service(BROKER_SERVICE)
+            manual_actions = 2  # stop and start
+        else:
+            sever_network(PUBLISHER_SERVICE)
+            manual_actions = 2
+    elif mode == "network":
+        sever_network(PUBLISHER_SERVICE)
+        manual_actions = 2
+    elif mode == "storage":
+        stop_service(INFLUX_SERVICE)
+        manual_actions = 2
+    else:
+        raise ValueError(f"unknown mode {mode!r}")
+
+    time.sleep(outage)
+
+    if mode == "broker" and configuration == "c1":
+        start_service(BROKER_SERVICE)
+    elif mode in ("broker", "network"):
+        restore_network(PUBLISHER_SERVICE)
+    elif mode == "storage":
+        start_service(INFLUX_SERVICE)
+
+    time.sleep(settle)
+
+    watched = STORAGE_SERVICE if mode == "storage" else PUBLISHER_SERVICE
+    entries = logs_since(watched, since)
+
+    detected = first_event_time(entries, {"disconnected", "write_failed", "publish_failed"})
+    detection_seconds = (detected - started_at).total_seconds() if detected else None
+
+    resumed = None
+    for entry in entries:
+        if entry.get("event") not in {"connected", "started"}:
+            continue
+        moment = datetime.fromisoformat(entry["timestamp"])
+        if detected and moment > detected:
+            resumed = moment
+            break
+
+    recovery_seconds = None
+    if resumed:
+        recovery_seconds = (resumed - started_at).total_seconds() - outage
+
+    storage_entries = logs_since(STORAGE_SERVICE, since)
+
+    return {
+        "configuration": configuration,
+        "mode": mode,
+        "trial": trial,
+        "started_at": since,
+        "outage_seconds": outage,
+        "detection_seconds": round(detection_seconds, 3) if detection_seconds is not None else "",
+        "recovery_seconds": round(recovery_seconds, 3) if recovery_seconds is not None else "",
+        "messages_lost": total_missing(storage_entries),
+        "manual_actions": manual_actions,
+        "notes": "" if detected else "no detection event found in logs",
+    }
