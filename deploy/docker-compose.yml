@@ -67,3 +67,20 @@ services:
       - ../config/assets:/app/config/assets:ro
       - ./mosquitto/certs:/certs:ro
     restart: unless-stopped
+
+  storage-writer:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+    command: ["python", "-m", "twin.storage_writer"]
+    env_file:
+      - ${ENV_FILE:-../config/env/c1.env}
+    environment:
+      MQTT_CLIENT_ID: twin-storage-boiler_01
+      ASSET_ID: boiler_01
+    volumes:
+      - ./mosquitto/certs:/certs:ro
+    depends_on:
+      influxdb:
+        condition: service_healthy
+    restart: unless-stopped
