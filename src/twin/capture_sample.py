@@ -22,3 +22,12 @@ from twin.payload import PayloadError, parse
 COMPONENT = "capture_sample"
 TARGET_MESSAGES = 1000
 OUTPUT_PATH = os.environ.get("PAYLOAD_SAMPLE_PATH", "payload_sample.json")
+
+def summarise(sizes: list[int]) -> dict:
+    """Mean, min and max byte size."""
+    return {
+        "message_count": len(sizes),
+        "mean_bytes": round(sum(sizes) / len(sizes), 2),
+        "min_bytes": min(sizes),
+        "max_bytes": max(sizes),
+    }
