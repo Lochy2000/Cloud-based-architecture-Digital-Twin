@@ -72,3 +72,15 @@ def first_event_time(entries: list[dict], events: set[str]) -> datetime | None:
 
 def total_missing(entries: list[dict]) -> int:
     return sum(e.get("messages_missing", 0) for e in entries if e.get("event") == "sequence_gap")
+
+
+# --- create the different failuer modes ----------------------------------------------------
+
+def sever_network(service: str) -> None:
+    """
+    Drop outbound traffic from a container. Requires NET_ADMIN, which is
+    granted to the publisher in compose
+    """
+    run(["docker", "exec", "--privileged", container_id(service),
+        "iptables", "-A", "OUTPUT", "-p", "tcp", "--dport", "8883", "-j", "DROP"])
+    
