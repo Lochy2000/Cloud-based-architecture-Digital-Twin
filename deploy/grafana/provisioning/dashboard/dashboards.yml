@@ -1,5 +1,6 @@
 # https://grafana.com/docs/grafana/latest/fundamentals/getting-started/first-dashboards/get-started-grafana-prometheus/
-
+# https://grafana.com/docs/learning-paths/prometheus/ 
+# https://grafana.com/docs/learning-paths/prom-remote-write/
 apiVersion: 1
 
 providers:
