@@ -31,3 +31,52 @@ def summarise(sizes: list[int]) -> dict:
         "min_bytes": min(sizes),
         "max_bytes": max(sizes),
     }
+
+def run() -> int:
+    logger = setup_logging(COMPONENT)
+    broker_config = load_broker_config()
+
+    asset_id = os.environ.get("ASSET_ID", "boiler_01")
+    topic = f"twin/{asset_id}/telemetry"
+
+    captured = []
+    sizes = []
+    complete = threading.Event()
+
+    def on_message(client, userdata, message):
+        if len(captured) >= TARGET_MESSAGES:
+            return
+        try:
+            payload = parse(message.payload)
+        except PayloadError as exc:
+            logger.error("malformed payload skipped", extra={"error": str(exc)})
+            return
+
+        sizes.append(len(message.payload))
+        captured.append(json.loads(message.payload.decode("utf-8")))
+
+        if len(captured) % 100 == 0:
+            logger.info("capture progress", extra={"captured": len(captured)})
+
+        if len(captured) >= TARGET_MESSAGES:
+            complete.set()
+
+    client = build_client(broker_config, f"twin-capture-{asset_id}", COMPONENT)
+    client.on_message = on_message
+    connect(client, broker_config)
+    client.subscribe(topic, qos=broker_config.qos)
+
+    logger.info("capture started", extra={"topic": topic, "target": TARGET_MESSAGES})
+    complete.wait()
+    disconnect(client)
+
+    summary = summarise(sizes)
+    with open(OUTPUT_PATH, "w", encoding="utf-8") as handle:
+        json.dump({"summary": summary, "messages": captured}, handle, indent=2)
+
+    logger.info("capture complete", extra={**summary, "output": OUTPUT_PATH})
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(run())
