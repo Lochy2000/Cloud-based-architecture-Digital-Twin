@@ -1,3 +1,4 @@
+# https://docs.docker.com/get-started/docker-concepts/building-images/writing-a-dockerfile/
 FROM python:3.11-slim
 
 # unbuffered stdout: without this, Python buffers output and log timestamps
