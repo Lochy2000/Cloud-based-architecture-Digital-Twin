@@ -98,12 +98,22 @@ class TestNewtonsCooling:
         assert result["supply_temperature_c"] > 20.0
         assert result["supply_temperature_c"] <= 65.0
 
-    def test_supply_temp_off_approaches_ambient(self, boiler_config):
-        # Boiler off should have supply temp at or near ambient baseline
-        ts = _timestamp(6, 15)  # In off period
-        result = simulate(boiler_config, ts, 15.0)
+    # def test_supply_temp_off_approaches_ambient(self, boiler_config):
+    #     # Boiler off should have supply temp at or near ambient baseline
+    #     ts = _timestamp(6, 15)  # In off period
+    #     result = simulate(boiler_config, ts, 15.0)
 
-        assert result["supply_temperature_c"] <= 20.0
+    #     assert result["supply_temperature_c"] <= 20.0
+    def test_supply_temp_decays_gradually_when_off(self, boiler_config):
+        # Cooling is exponential from the end-of-heating temperature toward
+        # ambient, not an instant drop. Values fall as time in the off phase grows.
+        one_minute_off = simulate(boiler_config, _timestamp(6, 11), 15.0)
+        five_minutes_off = simulate(boiler_config, _timestamp(6, 15), 15.0)
+        nine_minutes_off = simulate(boiler_config, _timestamp(6, 19), 15.0)
+
+        assert one_minute_off["supply_temperature_c"] > five_minutes_off["supply_temperature_c"]
+        assert five_minutes_off["supply_temperature_c"] > nine_minutes_off["supply_temperature_c"]
+        assert nine_minutes_off["supply_temperature_c"] > 20.0
 
     def test_return_temperature_delta_preserved(self, boiler_config):
         # Return should always be supply - 10°C
@@ -122,6 +132,16 @@ class TestNewtonsCooling:
 
         expected = 65.0 + (20.0 - 65.0) * math.exp(-1.0)
         assert abs(result["supply_temperature_c"] - expected) < 0.5
+
+# def test_exponential_approach_heating(self, boiler_config):
+#     start = simulate(boiler_config, _timestamp(6, 0, 0), 15.0)
+#     after_one_tau = simulate(boiler_config, _timestamp(6, 0, 25), 15.0)
+
+#     expected = 65.0 + (
+#         start["supply_temperature_c"] - 65.0
+#     ) * math.exp(-1.0)
+
+#     assert abs(after_one_tau["supply_temperature_c"] - expected) < 0.5
 
 
 class TestAmbientsAndSetpoint:
@@ -153,3 +173,26 @@ class TestTimezoneValidation:
 
         with pytest.raises(ValueError, match="UTC"):
             simulate(boiler_config, ts, 15.0)
+
+    # def test_cycle_repeats_identically(self, boiler_config):
+    #     # Same position in a later cycle gives the same reading, which is what
+    #     # makes the simulator reproducible across configurations and restarts.
+    #     first = simulate(boiler_config, _timestamp(6, 3), 15.0)
+    #     second = simulate(boiler_config, _timestamp(6, 23), 15.0)
+
+    #     assert first["supply_temperature_c"] == second["supply_temperature_c"]
+
+    def test_later_cycle_starts_warmer_than_cold_start(self, boiler_config):
+        first_cycle = simulate(
+            boiler_config,
+            _timestamp(6, 0),
+            15.0,
+        )
+        second_cycle = simulate(
+            boiler_config,
+            _timestamp(6, 20),
+            15.0,
+        )
+
+        assert first_cycle["supply_temperature_c"] == 20.0
+        assert second_cycle["supply_temperature_c"] > 20.0

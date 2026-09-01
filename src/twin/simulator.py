@@ -65,10 +65,41 @@ def simulate(asset_config: dict, timestamp: datetime, ambient_temperature: float
     # supply_temp = target + (ambient_baseline - target) * math.exp(-time_in_state / tau)
     
     cycle_position = seconds_into_window % cycle_period
+    completed_cycles = int(seconds_into_window // cycle_period)
+
     on_duration = cycle_period * on_fraction
     off_duration = cycle_period - on_duration
+
+    # Cold start at the beginning of each operating day.
+    cycle_start_temp = ambient_baseline
+
+    # Calculate the residual temperature at the beginning of the current cycle.
+    for _ in range(completed_cycles):
+        end_of_heating = supply_setpoint + (
+            cycle_start_temp - supply_setpoint
+        ) * math.exp(-on_duration / tau_heat)
+
+        cycle_start_temp = ambient_baseline + (
+            end_of_heating - ambient_baseline
+        ) * math.exp(-off_duration / tau_cool)
+
     boiler_on = cycle_position < on_duration
-    time_in_state = cycle_position if boiler_on else (cycle_position - on_duration)
+
+    if boiler_on:
+        time_in_state = cycle_position
+        supply_temp = supply_setpoint + (
+            cycle_start_temp - supply_setpoint
+        ) * math.exp(-time_in_state / tau_heat)
+    else:
+        time_in_state = cycle_position - on_duration
+
+        end_of_heating = supply_setpoint + (
+            cycle_start_temp - supply_setpoint
+        ) * math.exp(-on_duration / tau_heat)
+
+        supply_temp = ambient_baseline + (
+            end_of_heating - ambient_baseline
+        ) * math.exp(-time_in_state / tau_cool)
 
     # Newton's law of cooling: T(t) = T_target + (T_0 - T_target) * exp(-t / tau)
     # Per US Patent 9612030, applied to heating system dynamics where tau is the
@@ -76,22 +107,22 @@ def simulate(asset_config: dict, timestamp: datetime, ambient_temperature: float
     #
     # T_0 is the temperature at the last on/off transition. In a repeating cycle
     # these converge to fixed values, solved below so no stored history is needed.
-    heat_decay = math.exp(-on_duration / tau_heat)
-    cool_decay = math.exp(-off_duration / tau_cool)
-    # temp_at_on_end is how hot the boiler gets by the end of a heating phase; temp_at_off_end is how far it has cooled by the end of an off phase. Because the cycle repeats, these settle to fixed values that can be worked out from the parameters directly — no need to remember the previous reading, so the function stays pure.
+    # heat_decay = math.exp(-on_duration / tau_heat)
+    # cool_decay = math.exp(-off_duration / tau_cool)
+    # # temp_at_on_end is how hot the boiler gets by the end of a heating phase; temp_at_off_end is how far it has cooled by the end of an off phase. Because the cycle repeats, these settle to fixed values that can be worked out from the parameters directly — no need to remember the previous reading, so the function stays pure.
 
-    # Added different starting points to the phases. Heating starts from temp_at_off_end and climbs toward the setpoint. Cooling starts from temp_at_on_end and falls toward ambient. The old code used ambient as the start for both, which is what made the cooling branch collapse to a constant.
-    temp_at_on_end = (
-        supply_setpoint * (1 - heat_decay) + heat_decay * ambient_baseline * (1 - cool_decay)
-    ) / (1 - heat_decay * cool_decay)
-    temp_at_off_end = ambient_baseline + (temp_at_on_end - ambient_baseline) * cool_decay
+    # # Added different starting points to the phases. Heating starts from temp_at_off_end and climbs toward the setpoint. Cooling starts from temp_at_on_end and falls toward ambient. The old code used ambient as the start for both, which is what made the cooling branch collapse to a constant.
+    # temp_at_on_end = (
+    #     supply_setpoint * (1 - heat_decay) + heat_decay * ambient_baseline * (1 - cool_decay)
+    # ) / (1 - heat_decay * cool_decay)
+    # temp_at_off_end = ambient_baseline + (temp_at_on_end - ambient_baseline) * cool_decay
 
-    if boiler_on:
-        supply_temp = supply_setpoint + (temp_at_off_end - supply_setpoint) * math.exp(-time_in_state / tau_heat)
-    else:
-        supply_temp = ambient_baseline + (temp_at_on_end - ambient_baseline) * math.exp(-time_in_state / tau_cool)
+    # if boiler_on:
+    #     supply_temp = supply_setpoint + (temp_at_off_end - supply_setpoint) * math.exp(-time_in_state / tau_heat)
+    # else:
+    #     supply_temp = ambient_baseline + (temp_at_on_end - ambient_baseline) * math.exp(-time_in_state / tau_cool)
 
-    return_temp = supply_temp - return_delta
+    # return_temp = supply_temp - return_delta
 
     # Clamp and return
     # supply_temp = max(ambient_baseline, min(supply_setpoint + 5, supply_temp))
