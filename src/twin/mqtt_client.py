@@ -82,20 +82,20 @@ def _attach_logging_callbacks(client: mqtt.Client, logger, component: str) -> No
                 "broker connection refused",
                 extra={
                     "event": "connect_refused",
-                    "reason_code": int(reason_code),
+                    "reason_code": reason_code.value,
                     "component": component,
                 },
             )
     def on_disconnect(client, userdata, flags, reason_code, properties):
     # reason_code 0 means a deliberate disconnect; anything else is a
     # broker or network failure, which is what fault injection produces.
-        expected = int(reason_code) == 0
+        expected = reason_code.value == 0
         logger.warning(
             "broker disconnected",
             extra={
                 "event": "disconnected",
                 "expected": expected,
-                "reason_code": int(reason_code),
+                "reason_code": reason_code.value,
                 "component": component,
             },
         )

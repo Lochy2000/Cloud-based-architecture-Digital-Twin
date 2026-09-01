@@ -36,6 +36,17 @@ def _handle_shutdown(signum, frame):
 def topic_for(asset_id: str) -> str:
     return f"twin/{asset_id}/telemetry"
 
+def attach_subscription_callback(client, topic: str, qos: int) -> None:
+    """Subscribe after every successful connection, including reconnects."""
+    lifecycle_on_connect = client.on_connect
+
+    def on_connect(client, userdata, flags, reason_code, properties):
+        lifecycle_on_connect(client, userdata, flags, reason_code, properties)
+        if reason_code == 0:
+            client.subscribe(topic, qos=qos)
+
+    client.on_connect = on_connect
+
 def to_point(payload: TelemetryPayload) -> Point:
     """
     a validated payload onto an InfluxDB point.
@@ -109,9 +120,9 @@ def run() -> int:
         handle_message(message.payload, write_api, influx_config.bucket, tracker, logger)
 
     client.on_message = on_message
+    attach_subscription_callback(client, topic, broker_config.qos)
 
     connect(client, broker_config)
-    client.subscribe(topic, qos=broker_config.qos)
 
     logger.info(
         "storage writer started",

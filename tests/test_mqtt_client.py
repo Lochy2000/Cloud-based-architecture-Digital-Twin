@@ -7,10 +7,12 @@ broker. Connecting to Mosquitto, HiveMQ Cloud and AWS IoT Core is Stage 4's
 integration acceptance and cannot be covered here.
 """
 
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 import ssl
 
 import paho.mqtt.client as mqtt
+from paho.mqtt.packettypes import PacketTypes
+from paho.mqtt.reasoncodes import ReasonCode
 import pytest
 
 from twin.config import BrokerConfig
@@ -87,6 +89,20 @@ class TestBuildClient:
         assert client.on_connect is not None
         assert client.on_disconnect is not None
 
+    def test_disconnect_callback_logs_numeric_reason_code(self):
+        logger = MagicMock()
+        reason_code = ReasonCode(PacketTypes.DISCONNECT, identifier=128)
+
+        with patch.object(mqtt.Client, "tls_set"), \
+             patch("twin.mqtt_client.setup_logging", return_value=logger):
+            client = build_client(_password_config(), "id-callback", "test.callbacks")
+
+        client.on_disconnect(client, None, {}, reason_code, None)
+
+        extra = logger.warning.call_args.kwargs["extra"]
+        assert extra["reason_code"] == 128
+        assert extra["expected"] is False
+
 
 class TestCleanSessionFollowsQoS:
     """
@@ -137,7 +153,8 @@ class TestConnect:
 
         def fire_connack(*args, **kwargs):
             # Simulate the broker accepting the connection
-            client.on_connect(client, None, {}, 0, None)
+            reason_code = ReasonCode(PacketTypes.CONNACK, identifier=0)
+            client.on_connect(client, None, {}, reason_code, None)
 
         with patch.object(mqtt.Client, "connect"), \
             patch.object(mqtt.Client, "loop_start", side_effect=fire_connack), \

@@ -12,7 +12,13 @@ from unittest.mock import MagicMock
 import pytest
 
 from twin.payload import build_payload, serialize
-from twin.storage_writer import SequenceTracker, handle_message, to_point, topic_for
+from twin.storage_writer import (
+    SequenceTracker,
+    attach_subscription_callback,
+    handle_message,
+    to_point,
+    topic_for,
+)
 
 def _readings():
     return {
@@ -37,6 +43,23 @@ class TestTopic:
     def test_matches_publisher_topic(self):
         # Must agree with publisher.topic_for or nothing is ever received.
         assert topic_for("boiler_01") == "twin/boiler_01/telemetry"
+
+class TestSubscription:
+
+    def test_subscribes_after_initial_connect_and_reconnect(self):
+        client = MagicMock()
+        lifecycle_callback = MagicMock()
+        client.on_connect = lifecycle_callback
+        attach_subscription_callback(client, "twin/boiler_01/telemetry", qos=0)
+
+        success = MagicMock(value=0)
+        success.__eq__.side_effect = lambda other: success.value == other
+        client.on_connect(client, None, {}, success, None)
+        client.on_connect(client, None, {}, success, None)
+
+        assert lifecycle_callback.call_count == 2
+        assert client.subscribe.call_count == 2
+        client.subscribe.assert_called_with("twin/boiler_01/telemetry", qos=0)
 
 class TestToPoint:
 

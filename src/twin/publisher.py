@@ -130,7 +130,7 @@ def run() -> int:
         # rather than after a full interval
         deadline = time.monotonic() + remaining
         while time.monotonic() < deadline and not _shutdown_requested:
-            time.sleep(min(0.5, deadline - time.monotonic()))
+            time.sleep(max(0.0, min(0.5, deadline - time.monotonic())))
 
     logger.info(
         "publisher stopping",
