@@ -12,6 +12,30 @@ services:
       - ./mosquitto/certs:/mosquitto/certs:ro
       - ./mosquitto/passwd:/mosquitto/passwd:ro
       - mosquitto-data:/mosquitto/data
+    healthcheck:
+      test:
+        - CMD
+        - mosquitto_pub
+        - -h
+        - localhost
+        - -p
+        - "8883"
+        - --cafile
+        - /mosquitto/certs/ca.crt
+        - -u
+        - twin
+        - -P
+        - ${BROKER_PASSWORD}
+        - -q
+        - "1"
+        - -t
+        - twin/healthcheck
+        - -m
+        - ready
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 5s
     restart: unless-stopped
 
   influxdb:
@@ -67,6 +91,10 @@ services:
     volumes:
       - ../config/assets:/app/config/assets:ro
       - ./mosquitto/certs:/certs:ro
+    depends_on:
+      mosquitto:
+        condition: service_healthy
+        required: false
     restart: unless-stopped
 
   storage-writer:
@@ -82,6 +110,9 @@ services:
     volumes:
       - ./mosquitto/certs:/certs:ro
     depends_on:
+      mosquitto:
+        condition: service_healthy
+        required: false
       influxdb:
         condition: service_healthy
     restart: unless-stopped
