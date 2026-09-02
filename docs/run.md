@@ -1,12 +1,15 @@
-commands used so far to setup 
+# Local quick start
 
-## activate env 
+Commands use Windows PowerShell and assume the repository root is current.
+
+## Python environment
+
+```powershell
 python -m venv .venv
 .\.venv\Scripts\Activate.ps1
-
-## install requirements ( make sure to use python -m to install into venv)
 python -m pip install -r requirements.txt
-
+### move into deploy folder
+cd deploy
 ### run full stack
 docker compose --env-file ../config/env/c1.env --profile c1 up --build                                                               
 ### Check service state
