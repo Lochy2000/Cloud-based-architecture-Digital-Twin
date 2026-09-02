@@ -62,6 +62,22 @@ class TestLoadBrokerConfig:
         assert cfg.keepalive == 60  # default, not set above
         assert cfg.qos == 1    
 
+    def test_password_auth_uses_private_ca_when_configured(self, monkeypatch, tmp_path):
+        ca = tmp_path / "ca.crt"
+        ca.write_text("placeholder")
+        monkeypatch.setenv("BROKER_HOST", "mosquitto")
+        monkeypatch.setenv("BROKER_PORT", "8883")
+        monkeypatch.setenv("BROKER_TLS", "true")
+        monkeypatch.setenv("BROKER_AUTH_MODE", "password")
+        monkeypatch.setenv("BROKER_USERNAME", "twin")
+        monkeypatch.setenv("BROKER_PASSWORD", "secret")
+        monkeypatch.setenv("BROKER_CA_CERT", str(ca))
+        monkeypatch.setenv("MQTT_QOS", "1")
+
+        cfg = load_broker_config()
+
+        assert cfg.ca_cert == str(ca)
+
     def test_cert_auth_success(self, monkeypatch, tmp_path):
         ca = tmp_path / "ca.pem"
         cert = tmp_path / "client.pem"

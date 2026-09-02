@@ -118,6 +118,11 @@ def load_broker_config() -> BrokerConfig:
     username = password = None
     ca_cert = client_cert = client_key = None
 
+    # Password authentication can still use a private TLS CA (C1). Managed
+    # brokers may omit this and use the operating system trust store instead.
+    if tls and os.environ.get("BROKER_CA_CERT"):
+        ca_cert = _require_existing_file("BROKER_CA_CERT")
+
     if auth_mode == "password":
         username = _require("BROKER_USERNAME")
         password = _require("BROKER_PASSWORD")
