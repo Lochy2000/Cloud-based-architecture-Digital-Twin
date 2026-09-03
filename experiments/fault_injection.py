@@ -24,7 +24,9 @@ import subprocess
 import time
 from datetime import datetime, timezone
 from pathlib import Path
+import os
 
+ENV_FILE = os.environ.get("COMPOSE_ENV_FILE", "../config/env/c1.env")
 OUTPUT_PATH = Path("recovery_trials.csv")
 FIELDNAMES = [
     "configuration", "mode", "trial", "started_at",
@@ -41,7 +43,7 @@ def run(command: list[str], check: bool = True) -> subprocess.CompletedProcess:
     return subprocess.run(command, capture_output=True, text=True, check=check)
 
 def compose(*args: str, check: bool = True) -> subprocess.CompletedProcess:
-    return run(["docker", "compose", *args], check=check)
+    return run(["docker", "compose", "--env-file", ENV_FILE, *args], check=check)
 
 def container_id(service: str) -> str:
     result = compose("ps", "-q", service)
