@@ -57,6 +57,10 @@ def next_tick_delay(start: float, sequence: int, interval: float, now: float) ->
     """
     return start + (sequence * interval) - now
 
+def sleep_duration(deadline: float, now: float) -> float:
+    """Return a non-negative, shutdown-responsive scheduler sleep duration."""
+    return max(0.0, min(0.5, deadline - now))
+
 def run() -> int:
     logger = setup_logging(COMPONENT)
 
@@ -130,7 +134,7 @@ def run() -> int:
         # rather than after a full interval
         deadline = time.monotonic() + remaining
         while time.monotonic() < deadline and not _shutdown_requested:
-            time.sleep(max(0.0, min(0.5, deadline - time.monotonic())))
+            time.sleep(sleep_duration(deadline, time.monotonic()))
 
     logger.info(
         "publisher stopping",

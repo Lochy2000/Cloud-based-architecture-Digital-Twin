@@ -8,7 +8,7 @@ would understate message count, which would directly effect the costs
 The publish loop itself is teste against a live broker.
 """
 
-from twin.publisher import next_tick_delay, topic_for
+from twin.publisher import next_tick_delay, sleep_duration, topic_for
 
 class TestTopic:
 
@@ -40,3 +40,10 @@ class TestMonotonicScheduling:
     def test_sub_second_interval_supported(self):
         # Load testing may use intervals below one second.
         assert next_tick_delay(start=0.0, sequence=4, interval=0.25, now=0.5) == 0.5
+
+    def test_elapsed_deadline_never_produces_negative_sleep(self):
+        # The clock can pass the deadline between the loop condition and sleep.
+        assert sleep_duration(deadline=1000.0, now=1000.001) == 0.0
+
+    def test_sleep_slice_is_limited_for_prompt_shutdown(self):
+        assert sleep_duration(deadline=1010.0, now=1000.0) == 0.5
