@@ -1,0 +1,8 @@
+services:
+  publisher:
+    image: ${TWIN_IMAGE:-ghcr.io/lochy2000/cloud-based-architecture-digital-twin:latest}
+    build: !reset null
+
+  storage-writer:
+    image: ${TWIN_IMAGE:-ghcr.io/lochy2000/cloud-based-architecture-digital-twin:latest}
+    build: !reset null

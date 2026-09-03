@@ -23,6 +23,9 @@ python -m pip install -r requirements.txt
 pytest -q
 ```
 
+The production image installs `requirements-runtime.txt`, which excludes pytest
+and other development-only packages.
+
 Run one module or test group while developing:
 
 ```powershell

@@ -1,23 +1,28 @@
-# https://docs.docker.com/get-started/docker-concepts/building-images/writing-a-dockerfile/
 FROM python:3.11-slim
 
-# unbuffered stdout: without this, Python buffers output and log timestamps
-# lag events. 
-ENV PYTHONUNBUFFERED=1 \
-    PYTHONDONTWRITEBYTECODE=1
+ARG VCS_REF=unknown
+ARG VERSION=0.0.0-dev
 
+LABEL org.opencontainers.image.source="https://github.com/Lochy2000/Cloud-based-architecture-Digital-Twin" \
+      org.opencontainers.image.description="Python runtime for the cloud-based thermal-asset digital twin" \
+      org.opencontainers.image.revision="${VCS_REF}" \
+      org.opencontainers.image.version="${VERSION}" \
+      org.opencontainers.image.licenses="NOASSERTION"
+
+ENV PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONPATH=/app/src
 
 WORKDIR /app
 
-COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+COPY requirements-runtime.txt .
+RUN python -m pip install --no-cache-dir -r requirements-runtime.txt
 
-COPY src/ /app/src/
-ENV PYTHONPATH=/app/src
+RUN groupadd --gid 10001 twin \
+    && useradd --uid 10001 --gid twin --create-home --shell /usr/sbin/nologin twin
 
-# non-root: the container writes nothing to disk.
-RUN useradd --create-home --shell /bin/false twin
-USER twin
+COPY --chown=twin:twin src/ /app/src/
 
-# overridden per service in docker-compose.yml.
+USER 10001:10001
+
 CMD ["python", "-m", "twin.publisher"]

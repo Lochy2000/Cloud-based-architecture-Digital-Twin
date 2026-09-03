@@ -1,6 +1,7 @@
 # Tools and references
 
-Python versions are pinned in `requirements.txt`; container image versions are
+Python runtime versions are pinned in `requirements-runtime.txt`; development
+and test additions are in `requirements.txt`. Container image versions are
 pinned in `deploy/docker-compose.yml`.
 
 ## Runtime and development

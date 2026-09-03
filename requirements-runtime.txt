@@ -1,0 +1,4 @@
+# Runtime dependencies only. Checked against PyPI on 2026-08-20.
+paho-mqtt==2.1.0
+influxdb-client==1.50.0
+PyYAML==6.0.3

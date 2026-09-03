@@ -13,6 +13,11 @@ Set-Location deploy
 docker compose --env-file ../config/env/c1.env --profile c1 config --quiet
 ```
 
+For the published runtime, merge `docker-compose.registry.yml` after the main
+file and use `up --no-build`. The override changes only the publisher and
+storage-writer image source; supporting services and runtime behaviour remain
+unchanged.
+
 ## TLS and broker credentials
 
 C1 requires a private CA, a server certificate for `mosquitto`, and a Mosquitto
