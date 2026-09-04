@@ -16,6 +16,9 @@ ENV PYTHONUNBUFFERED=1 \
 WORKDIR /app
 
 COPY requirements-runtime.txt .
+RUN apt-get update \
+    && apt-get install --no-install-recommends --yes iptables \
+    && rm -rf /var/lib/apt/lists/*
 RUN python -m pip install --no-cache-dir -r requirements-runtime.txt
 
 RUN groupadd --gid 10001 twin \

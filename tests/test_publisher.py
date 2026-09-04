@@ -8,7 +8,9 @@ would understate message count, which would directly effect the costs
 The publish loop itself is teste against a live broker.
 """
 
-from twin.publisher import next_tick_delay, sleep_duration, topic_for
+import paho.mqtt.client as mqtt
+
+from twin.publisher import next_tick_delay, publish_outcome, sleep_duration, topic_for
 
 class TestTopic:
 
@@ -47,3 +49,15 @@ class TestMonotonicScheduling:
 
     def test_sleep_slice_is_limited_for_prompt_shutdown(self):
         assert sleep_duration(deadline=1010.0, now=1000.0) == 0.5
+
+
+class TestPublishOutcome:
+
+    def test_success_is_accepted(self):
+        assert publish_outcome(1, mqtt.MQTT_ERR_SUCCESS) == "accepted"
+
+    def test_qos_1_no_connection_is_deferred(self):
+        assert publish_outcome(1, mqtt.MQTT_ERR_NO_CONN) == "deferred"
+
+    def test_qos_0_no_connection_is_failed(self):
+        assert publish_outcome(0, mqtt.MQTT_ERR_NO_CONN) == "failed"

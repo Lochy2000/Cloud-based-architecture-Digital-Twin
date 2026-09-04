@@ -16,6 +16,8 @@ import sys
 import time
 from datetime import datetime, timezone
 
+import paho.mqtt.client as mqtt
+
 from twin.assets import load_asset
 from twin.config import load_broker_config, load_workload_config
 from twin.logging_setup import setup_logging
@@ -61,6 +63,14 @@ def sleep_duration(deadline: float, now: float) -> float:
     """Return a non-negative, shutdown-responsive scheduler sleep duration."""
     return max(0.0, min(0.5, deadline - now))
 
+def publish_outcome(qos: int, reason_code: int) -> str:
+    """Classify whether Paho accepted, deferred, or rejected a publish."""
+    if reason_code == mqtt.MQTT_ERR_SUCCESS:
+        return "accepted"
+    if qos > 0 and reason_code == mqtt.MQTT_ERR_NO_CONN:
+        return "deferred"
+    return "failed"
+
 def run() -> int:
     logger = setup_logging(COMPONENT)
 
@@ -91,7 +101,8 @@ def run() -> int:
     )
 
     sequence = 0
-    published = 0
+    accepted = 0
+    deferred = 0
     start = time.monotonic()
 
     while not _shutdown_requested:
@@ -101,8 +112,20 @@ def run() -> int:
         payload = build_payload(asset_id, sequence, timestamp, readings)
 
         result = client.publish(topic, serialize(payload), qos=broker_config.qos)
+        outcome = publish_outcome(broker_config.qos, result.rc)
 
-        if result.rc != 0:
+        if outcome == "deferred":
+            accepted += 1
+            deferred += 1
+            logger.warning(
+                "publish queued until reconnect",
+                extra={
+                    "event": "publish_deferred",
+                    "sequence": sequence,
+                    "reason_code": int(result.rc),
+                },
+            )
+        elif outcome == "failed":
             logger.error(
                 "publish failed",
                 extra={
@@ -112,7 +135,7 @@ def run() -> int:
                 },
             )
         else:
-            published += 1
+            accepted += 1
 
         sequence += 1
 
@@ -140,7 +163,8 @@ def run() -> int:
         "publisher stopping",
         extra={
             "event": "stopping",
-            "messages_published": published,
+            "messages_accepted": accepted,
+            "messages_deferred": deferred,
             "final_sequence": sequence - 1 if sequence else None,
         },
     )

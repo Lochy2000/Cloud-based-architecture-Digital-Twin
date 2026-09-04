@@ -36,8 +36,13 @@ control.
 ## Observability
 
 Application logs are structured JSON on standard output. Important events
-include `connected`, `disconnected`, `connect_refused`, `publish_failed`,
+include `connected`, `disconnected`, `connect_refused`, `publish_deferred`, `publish_failed`,
 `tick_overrun`, `sequence_gap`, `payload_rejected`, and `write_failed`.
+
+Fault trials default to a 150-second outage so a silent packet drop remains in
+place long enough for a 60-second MQTT keepalive failure to be detected. Manual
+actions count operator recovery steps only; the commands used to inject and
+remove a fault are excluded.
 
 ```powershell
 docker compose --env-file ../config/env/c1.env --profile c1 ps

@@ -38,6 +38,19 @@ PUBLISHER_SERVICE = "publisher"
 STORAGE_SERVICE = "storage-writer"
 INFLUX_SERVICE = "influxdb"
 BROKER_SERVICE = "mosquitto"
+DEFAULT_OUTAGE_SECONDS = 150.0
+
+MANUAL_RECOVERY_ACTIONS = {
+    ("c1", "broker"): 1,   # restart the self-hosted broker
+    ("c2a", "broker"): 0,  # managed broker and client recover automatically
+    ("c2b", "broker"): 0,
+    ("c1", "network"): 1,  # restore publisher connectivity
+    ("c2a", "network"): 1,
+    ("c2b", "network"): 1,
+    ("c1", "storage"): 1,  # restart InfluxDB
+    ("c2a", "storage"): 1,
+    ("c2b", "storage"): 1,
+}
 
 def run(command: list[str], check: bool = True) -> subprocess.CompletedProcess:
     return subprocess.run(command, capture_output=True, text=True, check=check)
@@ -75,6 +88,10 @@ def first_event_time(entries: list[dict], events: set[str]) -> datetime | None:
 def total_missing(entries: list[dict]) -> int:
     return sum(e.get("messages_missing", 0) for e in entries if e.get("event") == "sequence_gap")
 
+def manual_actions_for(configuration: str, mode: str) -> int:
+    """Return operator recovery actions, excluding fault injection actions."""
+    return MANUAL_RECOVERY_ACTIONS[(configuration, mode)]
+
 
 # --- create the different failuer modes ----------------------------------------------------
 
@@ -83,11 +100,11 @@ def sever_network(service: str) -> None:
     Drop outbound traffic from a container. Requires NET_ADMIN, which is
     granted to the publisher in compose
     """
-    run(["docker", "exec", "--privileged", container_id(service),
+    run(["docker", "exec", "--privileged", "-u", "0", container_id(service),
         "iptables", "-A", "OUTPUT", "-p", "tcp", "--dport", "8883", "-j", "DROP"])
 
 def restore_network(service: str) -> None:
-    run(["docker", "exec", "--privileged", container_id(service),
+    run(["docker", "exec", "--privileged", "-u", "0", container_id(service),
         "iptables", "-D", "OUTPUT", "-p", "tcp", "--dport", "8883", "-j", "DROP"])
 
 def stop_service(service: str) -> None:
@@ -106,18 +123,16 @@ def run_trial(configuration: str, mode: str, trial: int, outage: float, settle: 
     if mode == "broker":
         if configuration == "c1":
             stop_service(BROKER_SERVICE)
-            manual_actions = 2  # stop and start
         else:
             sever_network(PUBLISHER_SERVICE)
-            manual_actions = 2
     elif mode == "network":
         sever_network(PUBLISHER_SERVICE)
-        manual_actions = 2
     elif mode == "storage":
         stop_service(INFLUX_SERVICE)
-        manual_actions = 2
     else:
         raise ValueError(f"unknown mode {mode!r}")
+
+    manual_actions = manual_actions_for(configuration, mode)
 
     time.sleep(outage)
 
@@ -133,7 +148,10 @@ def run_trial(configuration: str, mode: str, trial: int, outage: float, settle: 
     watched = STORAGE_SERVICE if mode == "storage" else PUBLISHER_SERVICE
     entries = logs_since(watched, since)
 
-    detected = first_event_time(entries, {"disconnected", "write_failed", "publish_failed"})
+    detected = first_event_time(
+        entries,
+        {"disconnected", "write_failed", "publish_failed", "publish_deferred"},
+    )
     detection_seconds = (detected - started_at).total_seconds() if detected else None
 
     resumed = None
@@ -177,7 +195,7 @@ def main() -> int:
     parser.add_argument("--configuration", required=True, choices=["c1", "c2a", "c2b"])
     parser.add_argument("--mode", choices=["broker", "network", "storage", "all"], default="all")
     parser.add_argument("--trials", type=int, default=3)
-    parser.add_argument("--outage", type=float, default=60.0,
+    parser.add_argument("--outage", type=float, default=DEFAULT_OUTAGE_SECONDS,
                         help="seconds the failure is held")
     parser.add_argument("--settle", type=float, default=90.0,
                         help="seconds to wait after restoring before reading logs")
