@@ -1,5 +1,5 @@
 """
-for src/twin/asset.py.
+for src/twin/assets.py.
 
 asset YAML is the only file the pipeline reads at runtime, so a malformed
 or incomplete one must fail at startup with a named field rather than
