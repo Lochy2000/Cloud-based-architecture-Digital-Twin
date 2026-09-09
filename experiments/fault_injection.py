@@ -11,9 +11,9 @@ Failure modes:
   storage     InfluxDB stopped, messages still arriving
 
 for the self-hosted configuration the broker is stopped directly. For the
-managed brokers there is no container to stop, so connectivity is severed
-inside the publisher container instead. The same mechanism is used for the
-network mode across all three configurations, which keeps the comparison
+managed brokers there is no container to stop, so Docker disconnects the
+publisher container from its network instead. The same mechanism is used for
+the network mode across all three configurations, which keeps the comparison
 consistent.
 """
 
@@ -95,17 +95,28 @@ def manual_actions_for(configuration: str, mode: str) -> int:
 
 # --- create the different failuer modes ----------------------------------------------------
 
-def sever_network(service: str) -> None:
-    """
-    Drop outbound traffic from a container. Requires NET_ADMIN, which is
-    granted to the publisher in compose
-    """
-    run(["docker", "exec", "--privileged", "-u", "0", container_id(service),
-        "iptables", "-A", "OUTPUT", "-p", "tcp", "--dport", "8883", "-j", "DROP"])
+def container_network(container: str) -> str:
+    """Return the single Docker network attached to a trial container."""
+    result = run([
+        "docker", "inspect", "--format", "{{json .NetworkSettings.Networks}}", container
+    ])
+    networks = list(json.loads(result.stdout))
+    if len(networks) != 1:
+        raise RuntimeError(
+            f"expected container {container!r} to have one network, found {networks}"
+        )
+    return networks[0]
 
-def restore_network(service: str) -> None:
-    run(["docker", "exec", "--privileged", "-u", "0", container_id(service),
-        "iptables", "-D", "OUTPUT", "-p", "tcp", "--dport", "8883", "-j", "DROP"])
+def sever_network(service: str) -> tuple[str, str]:
+    """Disconnect a service container from its Compose network."""
+    container = container_id(service)
+    network = container_network(container)
+    run(["docker", "network", "disconnect", network, container])
+    return network, container
+
+def restore_network(network: str, container: str) -> None:
+    """Reconnect a service container to its original Compose network."""
+    run(["docker", "network", "connect", network, container])
 
 def stop_service(service: str) -> None:
     compose("stop", service)
@@ -119,14 +130,15 @@ def start_service(service: str) -> None:
 def run_trial(configuration: str, mode: str, trial: int, outage: float, settle: float) -> dict:
     started_at = datetime.now(timezone.utc)
     since = started_at.isoformat()
+    severed_connection = None
 
     if mode == "broker":
         if configuration == "c1":
             stop_service(BROKER_SERVICE)
         else:
-            sever_network(PUBLISHER_SERVICE)
+            severed_connection = sever_network(PUBLISHER_SERVICE)
     elif mode == "network":
-        sever_network(PUBLISHER_SERVICE)
+        severed_connection = sever_network(PUBLISHER_SERVICE)
     elif mode == "storage":
         stop_service(INFLUX_SERVICE)
     else:
@@ -139,7 +151,7 @@ def run_trial(configuration: str, mode: str, trial: int, outage: float, settle: 
     if mode == "broker" and configuration == "c1":
         start_service(BROKER_SERVICE)
     elif mode in ("broker", "network"):
-        restore_network(PUBLISHER_SERVICE)
+        restore_network(*severed_connection)
     elif mode == "storage":
         start_service(INFLUX_SERVICE)
 
