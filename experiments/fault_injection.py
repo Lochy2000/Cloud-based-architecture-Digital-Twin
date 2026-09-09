@@ -156,7 +156,7 @@ def run_trial(configuration: str, mode: str, trial: int, outage: float, settle: 
 
     resumed = None
     for entry in entries:
-        if entry.get("event") not in {"connected", "started"}:
+        if entry.get("event") not in {"connected", "started", "write_recovered"}:
             continue
         moment = datetime.fromisoformat(entry["timestamp"])
         if detected and moment > detected:
