@@ -4,6 +4,7 @@ from unittest.mock import patch
 
 from experiments.fault_injection import (
     DEFAULT_OUTAGE_SECONDS,
+    container_network,
     first_event_time,
     manual_actions_for,
     restore_network,
@@ -17,18 +18,26 @@ def test_default_outage_exceeds_two_sixty_second_keepalives():
     assert DEFAULT_OUTAGE_SECONDS > 120
 
 
-def test_network_commands_run_iptables_as_root():
-    with patch("experiments.fault_injection.container_id", return_value="publisher-id"), \
-         patch("experiments.fault_injection.run") as command:
-        sever_network("publisher")
-        restore_network("publisher")
+def test_container_network_reads_the_attached_network():
+    result = type("Result", (), {"stdout": '{"digital-twin_default": {}}'})()
+    with patch("experiments.fault_injection.run", return_value=result):
+        assert container_network("publisher-id") == "digital-twin_default"
 
-    for call in command.call_args_list:
-        arguments = call.args[0]
-        assert arguments[:6] == [
-            "docker", "exec", "--privileged", "-u", "0", "publisher-id"
-        ]
-        assert arguments[6] == "iptables"
+
+def test_network_commands_disconnect_and_connect_the_container():
+    with patch("experiments.fault_injection.container_id", return_value="publisher-id"), \
+         patch("experiments.fault_injection.container_network", return_value="twin-network"), \
+         patch("experiments.fault_injection.run") as command:
+        connection = sever_network("publisher")
+        restore_network(*connection)
+
+    assert connection == ("twin-network", "publisher-id")
+    assert command.call_args_list[0].args[0] == [
+        "docker", "network", "disconnect", "twin-network", "publisher-id"
+    ]
+    assert command.call_args_list[1].args[0] == [
+        "docker", "network", "connect", "twin-network", "publisher-id"
+    ]
 
 
 def test_manual_actions_measure_recovery_not_fault_injection():
