@@ -10,7 +10,13 @@ The publish loop itself is teste against a live broker.
 
 import paho.mqtt.client as mqtt
 
-from twin.publisher import next_tick_delay, publish_outcome, sleep_duration, topic_for
+from twin.publisher import (
+    next_tick_delay,
+    publish_outcome,
+    should_log_progress,
+    sleep_duration,
+    topic_for,
+)
 
 class TestTopic:
 
@@ -61,3 +67,15 @@ class TestPublishOutcome:
 
     def test_qos_0_no_connection_is_failed(self):
         assert publish_outcome(0, mqtt.MQTT_ERR_NO_CONN) == "failed"
+
+
+class TestProgressCadence:
+
+    def test_logs_every_twentieth_message(self):
+        assert should_log_progress(19) is True
+        assert should_log_progress(39) is True
+
+    def test_does_not_log_between_cadence_boundaries(self):
+        assert should_log_progress(0) is False
+        assert should_log_progress(18) is False
+        assert should_log_progress(20) is False
