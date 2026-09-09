@@ -14,6 +14,7 @@ import pytest
 from twin.payload import build_payload, serialize
 from twin.storage_writer import (
     SequenceTracker,
+    WriteFailureState,
     attach_subscription_callback,
     handle_message,
     to_point,
@@ -162,6 +163,36 @@ class TestHandleMessage:
 
         assert stored is False
         logger.error.assert_called_once()
+
+    def test_first_success_after_failures_logs_one_recovery(self):
+        write_api = MagicMock()
+        write_api.write.side_effect = [
+            Exception("connection refused"),
+            Exception("connection refused"),
+            None,
+            None,
+        ]
+        logger = MagicMock()
+        state = WriteFailureState()
+        tracker = SequenceTracker()
+
+        for sequence in range(4):
+            handle_message(
+                _raw(sequence=sequence),
+                write_api,
+                "telemetry",
+                tracker,
+                logger,
+                state,
+            )
+
+        logger.info.assert_called_once()
+        recovery = logger.info.call_args.kwargs["extra"]
+        assert recovery == {
+            "event": "write_recovered",
+            "sequence": 2,
+            "failures_since_last_success": 2,
+        }
 
     def test_sequence_gap_is_logged(self):
         write_api = MagicMock()
