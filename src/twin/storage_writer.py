@@ -95,6 +95,20 @@ class SequenceTracker:
             return 0
         return sequence - previous - 1
 
+class WriteFailureState:
+    """Track consecutive database write failures until storage recovers."""
+
+    def __init__(self):
+        self.failures = 0
+
+    def record_failure(self) -> None:
+        self.failures += 1
+
+    def record_success(self) -> int:
+        failures = self.failures
+        self.failures = 0
+        return failures
+
 def run() -> int:
     logger = setup_logging(COMPONENT)
 
@@ -113,11 +127,19 @@ def run() -> int:
     write_api = influx.write_api(write_options=SYNCHRONOUS)
 
     tracker = SequenceTracker()
+    write_failure_state = WriteFailureState()
     client_id = os.environ.get("MQTT_CLIENT_ID", f"twin-storage-{asset_id}")
     client = build_client(broker_config, client_id, COMPONENT)
 
     def on_message(client, userdata, message):
-        handle_message(message.payload, write_api, influx_config.bucket, tracker, logger)
+        handle_message(
+            message.payload,
+            write_api,
+            influx_config.bucket,
+            tracker,
+            logger,
+            write_failure_state,
+        )
 
     client.on_message = on_message
     attach_subscription_callback(client, topic, broker_config.qos)
@@ -137,7 +159,14 @@ def run() -> int:
     influx.close()
     return 0
 
-def handle_message(raw: bytes, write_api, bucket: str, tracker: SequenceTracker, logger) -> bool:
+def handle_message(
+    raw: bytes,
+    write_api,
+    bucket: str,
+    tracker: SequenceTracker,
+    logger,
+    write_failure_state: WriteFailureState | None = None,
+) -> bool:
     """
     process one received message. will return True if it was stored.
 
@@ -162,6 +191,8 @@ def handle_message(raw: bytes, write_api, bucket: str, tracker: SequenceTracker,
     try:
         write_api.write(bucket=bucket, record=to_point(payload))
     except Exception as exc:
+        if write_failure_state is not None:
+            write_failure_state.record_failure()
         # InfluxDB being unreachable is a fault-injection mode in its own right.
         # message is lost, but the subscriber must keep running so recovery
         # is observable once storage returns
@@ -170,6 +201,17 @@ def handle_message(raw: bytes, write_api, bucket: str, tracker: SequenceTracker,
             extra={"event": "write_failed", "sequence": payload.sequence, "error": str(exc)},
         )
         return False
+
+    failures = write_failure_state.record_success() if write_failure_state else 0
+    if failures:
+        logger.info(
+            "influx write recovered",
+            extra={
+                "event": "write_recovered",
+                "sequence": payload.sequence,
+                "failures_since_last_success": failures,
+            },
+        )
 
     return True
 
