@@ -40,10 +40,13 @@ include `connected`, `disconnected`, `connect_refused`, `publish_deferred`, `pub
 `write_recovered`,
 `tick_overrun`, `sequence_gap`, `payload_rejected`, and `write_failed`.
 
-Fault trials default to a 150-second outage so a silent packet drop remains in
+Fault trials default to a 150-second outage so network isolation remains in
 place long enough for a 60-second MQTT keepalive failure to be detected. Manual
 actions count operator recovery steps only; the commands used to inject and
 remove a fault are excluded.
+
+Network faults use Docker network disconnect and connect operations from the
+host. The runtime container therefore needs neither root access nor `NET_ADMIN`.
 
 ```powershell
 docker compose --env-file ../config/env/c1.env --profile c1 ps
