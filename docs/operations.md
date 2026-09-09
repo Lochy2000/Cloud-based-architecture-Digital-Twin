@@ -37,6 +37,7 @@ control.
 
 Application logs are structured JSON on standard output. Important events
 include `connected`, `disconnected`, `connect_refused`, `publish_deferred`, `publish_failed`,
+`write_recovered`,
 `tick_overrun`, `sequence_gap`, `payload_rejected`, and `write_failed`.
 
 Fault trials default to a 150-second outage so a silent packet drop remains in
