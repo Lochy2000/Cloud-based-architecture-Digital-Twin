@@ -36,7 +36,8 @@ control.
 ## Observability
 
 Application logs are structured JSON on standard output. Important events
-include `connected`, `disconnected`, `connect_refused`, `publish_deferred`, `publish_failed`,
+include `connected`, `disconnected`, `connect_refused`, `publish_progress`,
+`publish_deferred`, `publish_failed`,
 `write_recovered`,
 `tick_overrun`, `sequence_gap`, `payload_rejected`, and `write_failed`.
 
