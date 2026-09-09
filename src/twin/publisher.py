@@ -26,6 +26,7 @@ from twin.payload import build_payload, serialize
 from twin.simulator import simulate
 
 COMPONENT = "publisher"
+PROGRESS_EVERY_MESSAGES = 20
 
 # external air temperature. Held constant in the base case: the framework
 # states cost and complexity measures are insensitive to telemetry realism,
@@ -71,6 +72,10 @@ def publish_outcome(qos: int, reason_code: int) -> str:
         return "deferred"
     return "failed"
 
+def should_log_progress(sequence: int) -> bool:
+    """Return True after each group of twenty zero-based message sequences."""
+    return (sequence + 1) % PROGRESS_EVERY_MESSAGES == 0
+
 def run() -> int:
     logger = setup_logging(COMPONENT)
 
@@ -103,6 +108,7 @@ def run() -> int:
     sequence = 0
     accepted = 0
     deferred = 0
+    overruns = 0
     start = time.monotonic()
 
     while not _shutdown_requested:
@@ -144,13 +150,30 @@ def run() -> int:
         # remaining = next_tick - time.monotonic()
         remaining = next_tick_delay(start, sequence, interval, time.monotonic())
 
-        if remaining < 0:
+        overran = remaining < 0
+        if overran:
+            overruns += 1
             #  tick was missed entirely; record it rather than silently
             # skipping, since it means the nominal message count was not met.
             logger.warning(
                 "tick overran interval",
                 extra={"event": "tick_overrun", "sequence": sequence, "late_by_seconds": -remaining},
             )
+
+        current_sequence = sequence - 1
+        if should_log_progress(current_sequence):
+            logger.info(
+                "publisher progress",
+                extra={
+                    "event": "publish_progress",
+                    "sequence": current_sequence,
+                    "messages_accepted": accepted,
+                    "messages_deferred": deferred,
+                    "tick_overruns": overruns,
+                },
+            )
+
+        if overran:
             continue
 
         # sleep in short slices so a shutdown signal is acted on promptly
@@ -165,6 +188,7 @@ def run() -> int:
             "event": "stopping",
             "messages_accepted": accepted,
             "messages_deferred": deferred,
+            "tick_overruns": overruns,
             "final_sequence": sequence - 1 if sequence else None,
         },
     )
