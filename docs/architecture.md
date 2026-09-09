@@ -59,6 +59,9 @@ Each payload contains:
 InfluxDB stores data in measurement `telemetry`. `asset_id` is an indexed tag;
 the sequence and five channels are fields. The payload timestamp is retained as
 the point timestamp so delayed delivery does not change measurement time.
+Shared query functions read sequence sets, timestamp bounds, message counts, and
+series cardinality. Sequence remains a field because making each sequence
+number a tag would create unbounded cardinality.
 
 ## Recovery and measurement
 
