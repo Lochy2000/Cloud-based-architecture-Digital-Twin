@@ -49,6 +49,13 @@ remove a fault are excluded.
 Network faults use Docker network disconnect and connect operations from the
 host. The runtime container therefore needs neither root access nor `NET_ADMIN`.
 
+Each trial requests publisher snapshots immediately before and after the fault
+window. Expected sequences are reconciled with the sequence set stored in
+InfluxDB, producing auditable `messages_expected`, `messages_stored`, and
+`messages_lost` columns. Live `sequence_gap` events remain diagnostic and are
+not used as the final loss total because QoS 1 can deliver a missing message
+later.
+
 ```powershell
 docker compose --env-file ../config/env/c1.env --profile c1 ps
 docker compose --env-file ../config/env/c1.env --profile c1 logs -f publisher storage-writer
