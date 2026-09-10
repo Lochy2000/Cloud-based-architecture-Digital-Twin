@@ -34,6 +34,7 @@ PROGRESS_EVERY_MESSAGES = 20
 AMBIENT_TEMPERATURE_C = 12.0
 
 _shutdown_requested = False
+_snapshot_requested = False
 
 def _handle_shutdown(signum, frame):
     """
@@ -44,6 +45,10 @@ def _handle_shutdown(signum, frame):
     """
     global _shutdown_requested
     _shutdown_requested = True
+
+def _handle_snapshot(signum, frame):
+    global _snapshot_requested
+    _snapshot_requested = True
 
 def topic_for(asset_id: str) -> str:
     return f"twin/{asset_id}/telemetry"
@@ -77,10 +82,13 @@ def should_log_progress(sequence: int) -> bool:
     return (sequence + 1) % PROGRESS_EVERY_MESSAGES == 0
 
 def run() -> int:
+    global _snapshot_requested
     logger = setup_logging(COMPONENT)
 
     signal.signal(signal.SIGTERM, _handle_shutdown)
     signal.signal(signal.SIGINT, _handle_shutdown)
+    if hasattr(signal, "SIGUSR1"):
+        signal.signal(signal.SIGUSR1, _handle_snapshot)
 
     broker_config = load_broker_config()
     workload_config = load_workload_config()
@@ -172,6 +180,19 @@ def run() -> int:
                     "tick_overruns": overruns,
                 },
             )
+
+        if _snapshot_requested:
+            logger.info(
+                "publisher snapshot",
+                extra={
+                    "event": "publisher_snapshot",
+                    "sequence": current_sequence,
+                    "messages_accepted": accepted,
+                    "messages_deferred": deferred,
+                    "tick_overruns": overruns,
+                },
+            )
+            _snapshot_requested = False
 
         if overran:
             continue
