@@ -25,13 +25,23 @@ import time
 from datetime import datetime, timezone
 from pathlib import Path
 import os
+import sys
+
+from dotenv import dotenv_values
+from influxdb_client import InfluxDBClient
+
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(PROJECT_ROOT / "src"))
+
+from twin.query import fetch_sequences
 
 ENV_FILE = os.environ.get("COMPOSE_ENV_FILE", "../config/env/c1.env")
-OUTPUT_PATH = Path("recovery_trials.csv")
+OUTPUT_PATH = Path(os.environ.get("TRIAL_OUTPUT_PATH", "recovery_trials.csv"))
 FIELDNAMES = [
     "configuration", "mode", "trial", "started_at",
     "outage_seconds", "detection_seconds", "recovery_seconds",
-    "messages_lost", "manual_actions", "notes",
+    "messages_expected", "messages_stored", "messages_lost",
+    "manual_actions", "notes",
 ]
 
 PUBLISHER_SERVICE = "publisher"
@@ -85,8 +95,18 @@ def first_event_time(entries: list[dict], events: set[str]) -> datetime | None:
             return datetime.fromisoformat(entry["timestamp"])
     return None
 
-def total_missing(entries: list[dict]) -> int:
-    return sum(e.get("messages_missing", 0) for e in entries if e.get("event") == "sequence_gap")
+def reconcile_sequences(start_sequence: int, end_sequence: int,
+                        stored_sequences: set[int]) -> dict[str, int]:
+    """Reconcile sequences attempted after start through the inclusive end."""
+    if end_sequence < start_sequence:
+        raise ValueError("publisher sequence restarted during the trial")
+    expected = set(range(start_sequence + 1, end_sequence + 1))
+    stored = expected & stored_sequences
+    return {
+        "messages_expected": len(expected),
+        "messages_stored": len(stored),
+        "messages_lost": len(expected - stored),
+    }
 
 def manual_actions_for(configuration: str, mode: str) -> int:
     """Return operator recovery actions, excluding fault injection actions."""
@@ -124,10 +144,40 @@ def stop_service(service: str) -> None:
 def start_service(service: str) -> None:
     compose("start", service)
 
+def publisher_snapshot(timeout: float = 45.0) -> dict:
+    """Request and return a fresh publisher snapshot event."""
+    requested_at = datetime.now(timezone.utc).isoformat()
+    run(["docker", "kill", "--signal=USR1", container_id(PUBLISHER_SERVICE)])
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        entries = logs_since(PUBLISHER_SERVICE, requested_at)
+        for entry in entries:
+            if entry.get("event") == "publisher_snapshot":
+                return entry
+        time.sleep(0.25)
+    raise RuntimeError(f"publisher did not emit a snapshot within {timeout}s")
+
+def stored_sequences(start: datetime, stop: datetime) -> set[int]:
+    """Query sequences stored during a trial using its environment file."""
+    values = dotenv_values(ENV_FILE)
+    url = os.environ.get("INFLUX_QUERY_URL", "http://localhost:8086")
+    token = os.environ.get("INFLUX_TOKEN") or values.get("INFLUX_TOKEN")
+    org = os.environ.get("INFLUX_ORG") or values.get("INFLUX_ORG")
+    bucket = os.environ.get("INFLUX_BUCKET") or values.get("INFLUX_BUCKET")
+    asset_id = os.environ.get("ASSET_ID") or values.get("ASSET_ID", "boiler_01")
+    if not all((token, org, bucket, asset_id)):
+        raise RuntimeError("trial environment is missing InfluxDB or asset settings")
+    with InfluxDBClient(url=url, token=token, org=org) as client:
+        return fetch_sequences(
+            client.query_api(), bucket, asset_id, start=start, stop=stop
+        )
+
 
 #----- run script --------------------------------------------------
 
 def run_trial(configuration: str, mode: str, trial: int, outage: float, settle: float) -> dict:
+    start_snapshot = publisher_snapshot()
+    window_start = datetime.fromisoformat(start_snapshot["timestamp"])
     started_at = datetime.now(timezone.utc)
     since = started_at.isoformat()
     severed_connection = None
@@ -157,6 +207,9 @@ def run_trial(configuration: str, mode: str, trial: int, outage: float, settle: 
 
     time.sleep(settle)
 
+    end_snapshot = publisher_snapshot()
+    window_stop = datetime.fromisoformat(end_snapshot["timestamp"])
+
     watched = STORAGE_SERVICE if mode == "storage" else PUBLISHER_SERVICE
     entries = logs_since(watched, since)
 
@@ -179,7 +232,11 @@ def run_trial(configuration: str, mode: str, trial: int, outage: float, settle: 
     if resumed:
         recovery_seconds = (resumed - started_at).total_seconds() - outage
 
-    storage_entries = logs_since(STORAGE_SERVICE, since)
+    loss = reconcile_sequences(
+        int(start_snapshot["sequence"]),
+        int(end_snapshot["sequence"]),
+        stored_sequences(window_start, window_stop),
+    )
 
     return {
         "configuration": configuration,
@@ -189,7 +246,7 @@ def run_trial(configuration: str, mode: str, trial: int, outage: float, settle: 
         "outage_seconds": outage,
         "detection_seconds": round(detection_seconds, 3) if detection_seconds is not None else "",
         "recovery_seconds": round(recovery_seconds, 3) if recovery_seconds is not None else "",
-        "messages_lost": total_missing(storage_entries),
+        **loss,
         "manual_actions": manual_actions,
         "notes": "" if detected else "no detection event found in logs",
     }
