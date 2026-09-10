@@ -4,9 +4,9 @@ from unittest.mock import patch
 
 from experiments.fault_injection import (
     DEFAULT_OUTAGE_SECONDS,
+    FIELDNAMES,
     container_network,
     first_event_time,
-    manual_actions_for,
     reconcile_sequences,
     restore_network,
     sever_network,
@@ -41,12 +41,8 @@ def test_network_commands_disconnect_and_connect_the_container():
     ]
 
 
-def test_manual_actions_measure_recovery_not_fault_injection():
-    assert manual_actions_for("c1", "broker") == 1
-    assert manual_actions_for("c2a", "broker") == 0
-    assert manual_actions_for("c2b", "broker") == 0
-    assert manual_actions_for("c1", "network") == 1
-    assert manual_actions_for("c1", "storage") == 1
+def test_trial_columns_exclude_inspected_recovery_actions():
+    assert "manual_actions" not in FIELDNAMES
 
 
 def test_write_recovered_can_mark_trial_resumption():

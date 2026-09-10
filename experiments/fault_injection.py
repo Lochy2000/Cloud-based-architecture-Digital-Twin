@@ -41,7 +41,7 @@ FIELDNAMES = [
     "configuration", "mode", "trial", "started_at",
     "outage_seconds", "detection_seconds", "recovery_seconds",
     "messages_expected", "messages_stored", "messages_lost",
-    "manual_actions", "notes",
+    "notes",
 ]
 
 PUBLISHER_SERVICE = "publisher"
@@ -49,18 +49,6 @@ STORAGE_SERVICE = "storage-writer"
 INFLUX_SERVICE = "influxdb"
 BROKER_SERVICE = "mosquitto"
 DEFAULT_OUTAGE_SECONDS = 150.0
-
-MANUAL_RECOVERY_ACTIONS = {
-    ("c1", "broker"): 1,   # restart the self-hosted broker
-    ("c2a", "broker"): 0,  # managed broker and client recover automatically
-    ("c2b", "broker"): 0,
-    ("c1", "network"): 1,  # restore publisher connectivity
-    ("c2a", "network"): 1,
-    ("c2b", "network"): 1,
-    ("c1", "storage"): 1,  # restart InfluxDB
-    ("c2a", "storage"): 1,
-    ("c2b", "storage"): 1,
-}
 
 def run(command: list[str], check: bool = True) -> subprocess.CompletedProcess:
     return subprocess.run(command, capture_output=True, text=True, check=check)
@@ -107,11 +95,6 @@ def reconcile_sequences(start_sequence: int, end_sequence: int,
         "messages_stored": len(stored),
         "messages_lost": len(expected - stored),
     }
-
-def manual_actions_for(configuration: str, mode: str) -> int:
-    """Return operator recovery actions, excluding fault injection actions."""
-    return MANUAL_RECOVERY_ACTIONS[(configuration, mode)]
-
 
 # --- create the different failuer modes ----------------------------------------------------
 
@@ -194,8 +177,6 @@ def run_trial(configuration: str, mode: str, trial: int, outage: float, settle: 
     else:
         raise ValueError(f"unknown mode {mode!r}")
 
-    manual_actions = manual_actions_for(configuration, mode)
-
     time.sleep(outage)
 
     if mode == "broker" and configuration == "c1":
@@ -247,7 +228,6 @@ def run_trial(configuration: str, mode: str, trial: int, outage: float, settle: 
         "detection_seconds": round(detection_seconds, 3) if detection_seconds is not None else "",
         "recovery_seconds": round(recovery_seconds, 3) if recovery_seconds is not None else "",
         **loss,
-        "manual_actions": manual_actions,
         "notes": "" if detected else "no detection event found in logs",
     }
 

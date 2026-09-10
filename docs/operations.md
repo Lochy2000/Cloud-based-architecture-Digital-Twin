@@ -42,9 +42,10 @@ include `connected`, `disconnected`, `connect_refused`, `publish_progress`,
 `tick_overrun`, `sequence_gap`, `payload_rejected`, and `write_failed`.
 
 Fault trials default to a 150-second outage so network isolation remains in
-place long enough for a 60-second MQTT keepalive failure to be detected. Manual
-actions count operator recovery steps only; the commands used to inject and
-remove a fault are excluded.
+place long enough for a 60-second MQTT keepalive failure to be detected.
+Recovery actions are assessed separately in the maintainability matrix by
+inspecting each configuration's runbook; they are not presented as measured
+trial data.
 
 Network faults use Docker network disconnect and connect operations from the
 host. The runtime container therefore needs neither root access nor `NET_ADMIN`.
