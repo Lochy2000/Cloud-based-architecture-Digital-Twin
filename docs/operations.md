@@ -59,18 +59,28 @@ later.
 
 ## Completed-run summaries
 
-Stop the publisher cleanly at the end of a measured run, then create its JSON
-summary from the `deploy` directory:
+Capture the publisher's network counter just after starting a measured run:
 
 ```powershell
+python ../experiments/run_summary.py --configuration c1 --capture-start
+```
+
+At the end of the run, capture the counter again immediately before stopping
+the publisher, then create the JSON summary:
+
+```powershell
+python ../experiments/run_summary.py --configuration c1 --capture-end
 docker compose --env-file ../config/env/c1.env --profile c1 stop publisher
 python ../experiments/run_summary.py --configuration c1
 ```
 
 The tool selects the latest completed `started`/`stopping` pair from the
 publisher logs. It records the run window, stored message count and time bounds,
-series cardinality, InfluxDB data-directory size, and publisher accepted,
-deferred, and overrun counts. Output is written to
+series cardinality, InfluxDB data-directory size, publisher accepted, deferred,
+and overrun counts, and the difference between the two network transmit
+counters. The network figure includes all publisher-container traffic,
+including local MQTT, DNS, and TLS traffic. It is a cross-check for provider
+billing data rather than a replacement for it. Output is written to
 `experiments/run_summaries/`; generated summaries are not committed. Restart
 the publisher with the normal Compose `start publisher` command if required.
 
