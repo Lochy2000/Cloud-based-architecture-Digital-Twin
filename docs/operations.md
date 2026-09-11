@@ -57,6 +57,23 @@ InfluxDB, producing auditable `messages_expected`, `messages_stored`, and
 not used as the final loss total because QoS 1 can deliver a missing message
 later.
 
+## Completed-run summaries
+
+Stop the publisher cleanly at the end of a measured run, then create its JSON
+summary from the `deploy` directory:
+
+```powershell
+docker compose --env-file ../config/env/c1.env --profile c1 stop publisher
+python ../experiments/run_summary.py --configuration c1
+```
+
+The tool selects the latest completed `started`/`stopping` pair from the
+publisher logs. It records the run window, stored message count and time bounds,
+series cardinality, InfluxDB data-directory size, and publisher accepted,
+deferred, and overrun counts. Output is written to
+`experiments/run_summaries/`; generated summaries are not committed. Restart
+the publisher with the normal Compose `start publisher` command if required.
+
 ```powershell
 docker compose --env-file ../config/env/c1.env --profile c1 ps
 docker compose --env-file ../config/env/c1.env --profile c1 logs -f publisher storage-writer

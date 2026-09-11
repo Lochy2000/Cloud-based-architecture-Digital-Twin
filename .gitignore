@@ -22,6 +22,7 @@ docker-compose.override.yml
 # decision_register.csv and similar working documents stay tracked;
 # only generated run output is ignored here.
 experiments/**/*.csv
+experiments/run_summaries/*.json
 payload_sample.json
 influxdb-data/
 grafana-data/
