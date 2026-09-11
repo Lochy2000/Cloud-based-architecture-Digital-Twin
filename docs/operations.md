@@ -74,6 +74,24 @@ deferred, and overrun counts. Output is written to
 `experiments/run_summaries/`; generated summaries are not committed. Restart
 the publisher with the normal Compose `start publisher` command if required.
 
+## Deployment timing
+
+The deployment timer measures wall-clock time from Compose startup until the
+first telemetry point is queryable in InfluxDB. Runtime images are prepared
+before timing begins. It performs three clean trials by default and reports the
+median:
+
+```powershell
+python experiments/deployment_timer.py --configuration c1
+```
+
+Each trial uses a dedicated Compose project named
+`digital-twin-timing-<configuration>`. Its volumes are removed before and after
+every measurement so later trials do not inherit an initialised database. This
+cleanup does not target the volumes of the normal `digital-twin` project.
+Generated timing files are written under `experiments/deployment_timings/` and
+are not committed.
+
 ```powershell
 docker compose --env-file ../config/env/c1.env --profile c1 ps
 docker compose --env-file ../config/env/c1.env --profile c1 logs -f publisher storage-writer
