@@ -59,6 +59,86 @@ def latest_completed_run(entries: list[dict]) -> tuple[dict, dict]:
     return completed
 
 
+def current_run(entries: list[dict]) -> dict:
+    """Return the active publisher run's started event."""
+    started = None
+    for entry in entries:
+        if entry.get("event") == "started":
+            started = entry
+        elif entry.get("event") == "stopping":
+            started = None
+    if started is None:
+        raise RuntimeError("publisher is not running")
+    return started
+
+
+def publisher_network_tx_bytes(env_file: str) -> tuple[str, int]:
+    """Read the publisher container's exact transmitted-byte counter."""
+    container = compose(env_file, "ps", "-q", "publisher").stdout.strip()
+    if not container:
+        raise RuntimeError("publisher container is not running")
+    result = run([
+        "docker", "exec", container,
+        "cat", "/sys/class/net/eth0/statistics/tx_bytes",
+    ])
+    return container, int(result.stdout.strip())
+
+
+def capture_network_counter(configuration: str, env_file: str,
+                            capture_file: Path, stage: str) -> dict:
+    """Record a start or end network counter for the active publisher run."""
+    started = current_run(structured_logs(env_file, "publisher"))
+    run_started_at = datetime.fromisoformat(started["timestamp"]).isoformat()
+    container, tx_bytes = publisher_network_tx_bytes(env_file)
+    captured_at = datetime.now(timezone.utc).isoformat()
+
+    if stage == "start":
+        capture = {
+            "configuration": configuration,
+            "container_id": container,
+            "publisher_started_at": run_started_at,
+            "start_captured_at": captured_at,
+            "tx_start_bytes": tx_bytes,
+        }
+    else:
+        if not capture_file.exists():
+            raise RuntimeError("network start checkpoint has not been captured")
+        capture = json.loads(capture_file.read_text(encoding="utf-8"))
+        if (
+            capture.get("configuration") != configuration
+            or capture.get("container_id") != container
+            or capture.get("publisher_started_at") != run_started_at
+        ):
+            raise RuntimeError("network checkpoint belongs to a different publisher run")
+        if tx_bytes < int(capture["tx_start_bytes"]):
+            raise RuntimeError("publisher network counter decreased during the run")
+        capture["end_captured_at"] = captured_at
+        capture["tx_end_bytes"] = tx_bytes
+
+    capture_file.parent.mkdir(parents=True, exist_ok=True)
+    capture_file.write_text(json.dumps(capture, indent=2) + "\n", encoding="utf-8")
+    return capture
+
+
+def network_measurements(capture: dict, publisher_started_at: datetime) -> dict:
+    """Validate a completed checkpoint and return its summary fields."""
+    if "tx_end_bytes" not in capture:
+        raise RuntimeError("network end checkpoint has not been captured")
+    if capture.get("publisher_started_at") != publisher_started_at.isoformat():
+        raise RuntimeError("network checkpoint belongs to a different completed run")
+    start = int(capture["tx_start_bytes"])
+    end = int(capture["tx_end_bytes"])
+    if end < start:
+        raise RuntimeError("publisher network counter decreased during the run")
+    return {
+        "publisher_network_tx_start_bytes": start,
+        "publisher_network_tx_end_bytes": end,
+        "publisher_network_tx_bytes": end - start,
+        "network_capture_started_at": capture["start_captured_at"],
+        "network_capture_ended_at": capture["end_captured_at"],
+    }
+
+
 def database_volume_bytes(env_file: str) -> int:
     """Measure the allocated InfluxDB data directory in KiB, returned as bytes."""
     result = compose(env_file, "exec", "-T", "influxdb", "du", "-sk", "/var/lib/influxdb2")
@@ -73,7 +153,7 @@ def required_setting(values: dict, name: str) -> str:
     return str(value)
 
 
-def create_summary(configuration: str, env_file: str) -> dict:
+def create_summary(configuration: str, env_file: str, network_capture: dict) -> dict:
     started, stopped = latest_completed_run(structured_logs(env_file, "publisher"))
     started_at = datetime.fromisoformat(started["timestamp"])
     stopped_at = datetime.fromisoformat(stopped["timestamp"])
@@ -115,6 +195,7 @@ def create_summary(configuration: str, env_file: str) -> dict:
         "publisher_messages_accepted": int(stopped["messages_accepted"]),
         "publisher_messages_deferred": int(stopped["messages_deferred"]),
         "publisher_tick_overruns": int(stopped["tick_overruns"]),
+        **network_measurements(network_capture, started_at),
     }
 
 
@@ -125,15 +206,36 @@ def default_output(configuration: str, summary: dict) -> Path:
     return PROJECT_ROOT / "experiments" / "run_summaries" / f"{configuration}_{timestamp}.json"
 
 
+def default_capture_file(configuration: str) -> Path:
+    return (
+        PROJECT_ROOT / "experiments" / "run_summaries"
+        / f".{configuration}_network_capture.json"
+    )
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="Summarise one completed digital-twin run.")
     parser.add_argument("--configuration", required=True, choices=["c1", "c2a", "c2b"])
     parser.add_argument("--env-file", help="Compose environment file")
     parser.add_argument("--output", type=Path, help="JSON output path")
+    stages = parser.add_mutually_exclusive_group()
+    stages.add_argument("--capture-start", action="store_true")
+    stages.add_argument("--capture-end", action="store_true")
+    parser.add_argument("--capture-file", type=Path, help="network checkpoint path")
     args = parser.parse_args()
 
     env_file = args.env_file or f"../config/env/{args.configuration}.env"
-    summary = create_summary(args.configuration, env_file)
+    capture_file = args.capture_file or default_capture_file(args.configuration)
+    if args.capture_start or args.capture_end:
+        stage = "start" if args.capture_start else "end"
+        capture_network_counter(args.configuration, env_file, capture_file, stage)
+        print(f"Network {stage} checkpoint written to {capture_file}")
+        return 0
+
+    if not capture_file.exists():
+        raise RuntimeError("network checkpoints have not been captured for this run")
+    network_capture = json.loads(capture_file.read_text(encoding="utf-8"))
+    summary = create_summary(args.configuration, env_file, network_capture)
     output = args.output or default_output(args.configuration, summary)
     output.parent.mkdir(parents=True, exist_ok=True)
     output.write_text(json.dumps(summary, indent=2) + "\n", encoding="utf-8")
