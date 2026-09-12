@@ -18,9 +18,9 @@ password authentication, and C2b is a managed broker using mutual TLS.
 - [TLS setup](tls-setup.md): concise C1 certificate and credential requirements.
 - [Grafana](grafana.md): dashboard provisioning and query maintenance.
 - [Tools and references](tools.md): dependencies and official documentation.
-- [Local quick start](run.md): minimum commands for C1.
+- [Ubuntu experiment runbook](docs/run.md): C1, C2a, C2b, and measurement commands.
 
 
 
 
-For a local C1 deployment, follow [docs/run.md](docs/run.md).
+For Ubuntu deployment and experiment execution, follow [docs/run.md](docs/run.md).
