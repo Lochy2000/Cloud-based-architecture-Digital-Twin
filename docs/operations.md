@@ -43,9 +43,10 @@ include `connected`, `disconnected`, `connect_refused`, `publish_progress`,
 
 Fault trials default to a 150-second outage so network isolation remains in
 place long enough for a 60-second MQTT keepalive failure to be detected.
-Recovery actions are assessed separately in the maintainability matrix by
-inspecting each configuration's runbook; they are not presented as measured
-trial data.
+Manual recovery effort is assessed separately in the maintainability matrix.
+The trial CSV records automated recovery commands actually performed in
+`recovery_actions`, together with the selected Compose project and restoration
+timestamp. These commands are not a manual-effort score.
 
 Network faults use Docker network disconnect and connect operations from the
 host. The runtime container therefore needs neither root access nor `NET_ADMIN`.
@@ -56,6 +57,14 @@ InfluxDB, producing auditable `messages_expected`, `messages_stored`, and
 `messages_lost` columns. Live `sequence_gap` events remain diagnostic and are
 not used as the final loss total because QoS 1 can deliver a missing message
 later.
+
+The fault runner requires `--configuration` and `--project-name`. Recovery is
+confirmed by polling InfluxDB for telemetry generated after the restoration
+command completes. After freezing the expected sequence range, it allows up
+to `--delivery-timeout` seconds for delivery; missing messages are loss at that
+deadline, not proof of permanent loss. Cleanup attempts to restore the fault
+target even on errors or Ctrl+C. See [run.md](run.md#fault-injection-experiment)
+for the updated command and CSV compatibility requirements.
 
 ## Completed-run summaries
 

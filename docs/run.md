@@ -319,13 +319,22 @@ Run three trials for each broker, network, and storage failure mode:
 ```bash
 python ../experiments/fault_injection.py \
   --configuration "$CONFIGURATION" \
+  --project-name "$COMPOSE_PROJECT_NAME" \
+  --delivery-timeout 90 \
   --mode all \
   --trials 3
 ```
 
-Default timing is a 150-second outage, 90-second recovery-settle period, and
-120-second gap between trials. Nine trials therefore take approximately 52
-minutes. Expected progress has this form:
+Use the actual project name of the running stack; check `docker compose ls`
+first. The runner selects `config/env/<configuration>.env` by default; use
+`--env-file /absolute/path/to/config.env` to override it. Run the script on the
+server hosting these containers. `INFLUX_QUERY_URL` defaults to
+`http://localhost:8086`.
+
+Default timing is a 150-second outage, up to 90 seconds for confirmed database
+recovery (`--settle`), up to 90 seconds for delivery of the fixed expected
+sequence range (`--delivery-timeout`), and a 120-second gap between trials.
+Snapshot requests add time, so campaign duration varies. Expected progress has this form:
 
 ```text
 [c1] network trial 1/3
@@ -338,6 +347,20 @@ Actual detection, recovery, and loss values will vary. Blank timing fields or
 `no detection event found in logs` require investigation. The CSV contains
 configuration, mode, timestamps, detection and recovery times, and reconciled
 expected, stored, and lost message counts.
+
+Recovery is measured from completion of the restoration command to the first
+observed database delivery of telemetry generated after restoration, with
+0.5-second polling plus query latency. Reconciliation includes the final
+expected message and waits for the fixed range to arrive. `messages_lost`
+means missing at the delivery deadline; later delivery remains possible.
+Database query errors abort reconciliation instead of being counted as loss.
+The CSV also records `compose_project`, `restored_at`, `recovery_actions`
+(automated commands actually performed), and `delivery_timeout_seconds`.
+These actions are not a manual-effort score. Use a new output filename if an
+existing CSV has the old header, for example `--output ../experiments/results/c1_recovery_v2.csv`.
+Fault targets are restored in cleanup after exceptions or Ctrl+C. Forced
+process termination or a Docker daemon failure can still prevent cleanup;
+check the stack before another trial if the runner exits with an error.
 
 For C1, broker mode stops the local Mosquitto container. For C2a and C2b, a
 managed broker cannot be stopped by this server, so broker mode simulates
