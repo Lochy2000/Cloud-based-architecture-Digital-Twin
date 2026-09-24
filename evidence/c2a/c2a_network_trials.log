@@ -1,0 +1,8 @@
+[c2a] network trial 1/3
+  detection=98.796s recovery=29.759s lost=0
+[c2a] network trial 2/3
+  detection=104.687s recovery=29.695s lost=0
+[c2a] network trial 3/3
+  detection=109.942s recovery=30.183s lost=0
+
+Written to /home/ubuntu/evidence/c2a/c2a_network_trials.csv

@@ -1,0 +1,27 @@
+=== C2a environment evidence ===
+2026-09-13T11:56:13+00:00
+--- repository ---
+fatal: cannot change to '/home/ubuntu/Cloud-based-architecture-Digital-Twin': No such file or directory
+fatal: cannot change to '/home/ubuntu/Cloud-based-architecture-Digital-Twin': No such file or directory
+--- instance metadata ---
+instance-id: i-0c8f2cf4bbd297c6c
+instance-type: t3.small
+ami-id: ami-07f936ee1f9a0de0e
+placement/availability-zone: eu-west-2a
+local-ipv4: 172.31.30.234
+public-ipv4: 35.178.38.39
+--- operating system ---
+Description:	Ubuntu 24.04.5 LTS
+Linux 7.0.0-1012-aws x86_64
+--- toolchain ---
+Docker version 29.8.0, build 88096ef
+Docker Compose version v5.5.1
+Python 3.12.3
+--- resources ---
+2
+               total        used        free      shared  buff/cache   available
+Mem:           1.9Gi       498Mi       287Mi       2.7Mi       1.3Gi       1.4Gi
+/dev/root        19G  4.6G   14G  25% /
+--- broker reachability ---
+grep: /home/ubuntu/Cloud-based-architecture-Digital-Twin/config/env/c2a.env: No such file or directory
+broker host: 

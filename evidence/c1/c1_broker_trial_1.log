@@ -1,0 +1,4 @@
+[c1] broker trial 1/1
+  detection=0.257s recovery=29.266s lost=0
+
+Written to /home/ubuntu/evidence/c1/c1_broker_trial_1.csv

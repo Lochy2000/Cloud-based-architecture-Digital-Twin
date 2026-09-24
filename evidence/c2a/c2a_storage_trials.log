@@ -1,0 +1,8 @@
+[c2a] storage trial 1/3
+  detection=29.932s recovery=29.704s lost=5
+[c2a] storage trial 2/3
+  detection=29.88s recovery=29.634s lost=5
+[c2a] storage trial 3/3
+  detection=29.741s recovery=29.273s lost=5
+
+Written to /home/ubuntu/evidence/c2a/c2a_storage_trials.csv

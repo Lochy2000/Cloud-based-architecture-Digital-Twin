@@ -1,0 +1,5 @@
+NAME                                IMAGE                             COMMAND                  SERVICE          CREATED              STATUS                        PORTS
+digital-twin-c2b-grafana-1          grafana/grafana:11.6.6            "/run.sh"                grafana          About a minute ago   Up About a minute             0.0.0.0:3000->3000/tcp, [::]:3000->3000/tcp
+digital-twin-c2b-influxdb-1         influxdb:2.7                      "/entrypoint.sh infl…"   influxdb         About a minute ago   Up About a minute (healthy)   0.0.0.0:8086->8086/tcp, [::]:8086->8086/tcp
+digital-twin-c2b-publisher-1        digital-twin-c2b-publisher        "python -m twin.publ…"   publisher        About a minute ago   Up About a minute             
+digital-twin-c2b-storage-writer-1   digital-twin-c2b-storage-writer   "python -m twin.stor…"   storage-writer   About a minute ago   Up About a minute             

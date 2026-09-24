@@ -1,0 +1,8 @@
+[c2b] network trial 1/3
+  detection=96.706s recovery=29.807s lost=0
+[c2b] network trial 2/3
+  detection=101.919s recovery=29.764s lost=0
+[c2b] network trial 3/3
+  detection=106.671s recovery=29.77s lost=0
+
+Written to /home/ubuntu/evidence/c2b/c2b_network_trials.csv

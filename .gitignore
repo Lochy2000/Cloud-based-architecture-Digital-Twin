@@ -32,3 +32,4 @@ grafana-data/
 .DS_Store
 .vscode/
 *.swp
+deploy/mosquitto/passwd

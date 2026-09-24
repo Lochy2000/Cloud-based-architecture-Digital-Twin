@@ -1,0 +1,15 @@
+2026-09-14T14:17:46+00:00
+
+Publisher transmitted bytes:
+1727697
+
+InfluxDB disk usage (KiB):
+820	/var/lib/influxdb2
+
+Container resource snapshot:
+CONTAINER ID   NAME                               CPU %     MEM USAGE / LIMIT     MEM %     NET I/O           BLOCK I/O         PIDS
+573fbfc29061   digital-twin-c1-publisher-1        0.02%     19.7MiB / 1.861GiB    1.03%     547kB / 1.73MB    77.8kB / 0B       2
+55f671e29b61   digital-twin-c1-storage-writer-1   0.01%     35.53MiB / 1.861GiB   1.86%     2.87MB / 3.31MB   24.6kB / 0B       2
+d5eb79c0b1c7   digital-twin-c1-grafana-1          0.23%     73.55MiB / 1.861GiB   3.86%     14.1MB / 507kB    8.45MB / 64.3MB   17
+f0e44515b840   digital-twin-c1-mosquitto-1        0.05%     3.152MiB / 1.861GiB   0.17%     2.53MB / 2.34MB   774kB / 217kB     1
+43118354f51c   digital-twin-c1-influxdb-1         0.05%     56.86MiB / 1.861GiB   2.98%     2.56MB / 1.13MB   3.87MB / 16.3MB   9

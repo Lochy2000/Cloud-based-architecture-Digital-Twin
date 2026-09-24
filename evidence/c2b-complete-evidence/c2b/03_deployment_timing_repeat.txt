@@ -1,0 +1,9 @@
+[c2b] deployment trial 1/3
+  first datapoint=13.591s
+[c2b] deployment trial 2/3
+  first datapoint=13.451s
+[c2b] deployment trial 3/3
+  first datapoint=13.568s
+
+Median: 13.568s
+Written to experiments/deployment_timings/c2b_repeat.json

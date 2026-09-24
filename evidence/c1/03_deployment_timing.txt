@@ -1,0 +1,9 @@
+[c1] deployment trial 1/3
+  first datapoint=36.955s
+[c1] deployment trial 2/3
+  first datapoint=37.024s
+[c1] deployment trial 3/3
+  first datapoint=37.029s
+
+Median: 37.024s
+Written to /home/ubuntu/digital-twin/experiments/deployment_timings/c1_20260913T114423Z.json

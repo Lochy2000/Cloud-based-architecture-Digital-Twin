@@ -1,0 +1,9 @@
+[c2b] deployment trial 1/3
+  first datapoint=32.105s
+[c2b] deployment trial 2/3
+  first datapoint=13.202s
+[c2b] deployment trial 3/3
+  first datapoint=13.52s
+
+Median: 13.52s
+Written to /home/ubuntu/digital-twin/experiments/deployment_timings/c2b_20260913T123808Z.json

@@ -1,0 +1,5 @@
+Result: _result
+Table: keys: [_start, _stop, _field, _measurement, asset_id]
+                   _start:time                      _stop:time           _field:string     _measurement:string         asset_id:string                      _time:time                  _value:int
+------------------------------  ------------------------------  ----------------------  ----------------------  ----------------------  ------------------------------  --------------------------
+2026-08-14T11:51:13.135798492Z  2026-09-13T11:51:13.135798492Z                sequence               telemetry               boiler_01  2026-09-13T11:46:32.379000000Z                           1

@@ -1,0 +1,8 @@
+[c2b] storage trial 1/3
+  detection=29.762s recovery=29.067s lost=5
+[c2b] storage trial 2/3
+  detection=29.901s recovery=29.237s lost=5
+[c2b] storage trial 3/3
+  detection=29.734s recovery=28.973s lost=5
+
+Written to /home/ubuntu/evidence/c2b/c2b_storage_trials.csv

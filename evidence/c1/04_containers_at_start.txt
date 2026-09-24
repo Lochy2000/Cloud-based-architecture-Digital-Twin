@@ -1,0 +1,6 @@
+NAME                               IMAGE                            COMMAND                  SERVICE          CREATED         STATUS                   PORTS
+digital-twin-c1-grafana-1          grafana/grafana:11.6.6           "/run.sh"                grafana          2 minutes ago   Up 2 minutes             0.0.0.0:3000->3000/tcp, [::]:3000->3000/tcp
+digital-twin-c1-influxdb-1         influxdb:2.7                     "/entrypoint.sh infl…"   influxdb         2 minutes ago   Up 2 minutes (healthy)   0.0.0.0:8086->8086/tcp, [::]:8086->8086/tcp
+digital-twin-c1-mosquitto-1        eclipse-mosquitto:2.1.2-alpine   "/docker-entrypoint.…"   mosquitto        2 minutes ago   Up 2 minutes (healthy)   1883/tcp, 0.0.0.0:8883->8883/tcp, [::]:8883->8883/tcp
+digital-twin-c1-publisher-1        digital-twin-c1-publisher        "python -m twin.publ…"   publisher        2 minutes ago   Up 2 minutes             
+digital-twin-c1-storage-writer-1   digital-twin-c1-storage-writer   "python -m twin.stor…"   storage-writer   2 minutes ago   Up 2 minutes             

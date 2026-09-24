@@ -1,0 +1,23 @@
+{
+  "configuration": "c2a",
+  "generated_at": "2026-09-13T12:04:26.978827+00:00",
+  "trials": [
+    {
+      "started_at": "2026-09-13T12:03:45.472117+00:00",
+      "seconds_to_first_datapoint": 12.892,
+      "trial": 1
+    },
+    {
+      "started_at": "2026-09-13T12:03:59.210186+00:00",
+      "seconds_to_first_datapoint": 12.88,
+      "trial": 2
+    },
+    {
+      "started_at": "2026-09-13T12:04:12.854136+00:00",
+      "seconds_to_first_datapoint": 13.405,
+      "trial": 3
+    }
+  ],
+  "median_seconds_to_first_datapoint": 12.892,
+  "poll_interval_seconds": 0.25
+}

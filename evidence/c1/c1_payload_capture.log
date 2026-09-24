@@ -1,0 +1,14 @@
+{"timestamp": "2026-09-15T10:02:21.636+00:00", "level": "INFO", "component": "capture_sample", "message": "broker connected", "event": "connected"}
+{"timestamp": "2026-09-15T10:02:21.637+00:00", "level": "INFO", "component": "capture_sample", "message": "capture started", "topic": "twin/boiler_01/telemetry", "target": 1000}
+{"timestamp": "2026-09-15T10:04:01.586+00:00", "level": "INFO", "component": "capture_sample", "message": "capture progress", "captured": 100}
+{"timestamp": "2026-09-15T10:05:41.585+00:00", "level": "INFO", "component": "capture_sample", "message": "capture progress", "captured": 200}
+{"timestamp": "2026-09-15T10:07:21.585+00:00", "level": "INFO", "component": "capture_sample", "message": "capture progress", "captured": 300}
+{"timestamp": "2026-09-15T10:09:01.594+00:00", "level": "INFO", "component": "capture_sample", "message": "capture progress", "captured": 400}
+{"timestamp": "2026-09-15T10:10:41.585+00:00", "level": "INFO", "component": "capture_sample", "message": "capture progress", "captured": 500}
+{"timestamp": "2026-09-15T10:12:21.586+00:00", "level": "INFO", "component": "capture_sample", "message": "capture progress", "captured": 600}
+{"timestamp": "2026-09-15T10:14:01.585+00:00", "level": "INFO", "component": "capture_sample", "message": "capture progress", "captured": 700}
+{"timestamp": "2026-09-15T10:15:41.585+00:00", "level": "INFO", "component": "capture_sample", "message": "capture progress", "captured": 800}
+{"timestamp": "2026-09-15T10:17:21.585+00:00", "level": "INFO", "component": "capture_sample", "message": "capture progress", "captured": 900}
+{"timestamp": "2026-09-15T10:19:01.614+00:00", "level": "INFO", "component": "capture_sample", "message": "capture progress", "captured": 1000}
+{"timestamp": "2026-09-15T10:19:01.615+00:00", "level": "WARNING", "component": "capture_sample", "message": "broker disconnected", "event": "disconnected", "expected": true, "reason_code": 0}
+{"timestamp": "2026-09-15T10:19:01.655+00:00", "level": "INFO", "component": "capture_sample", "message": "capture complete", "message_count": 1000, "mean_bytes": 247.14, "min_bytes": 245, "max_bytes": 249, "output": "/tmp/c1_payload_sample.json"}

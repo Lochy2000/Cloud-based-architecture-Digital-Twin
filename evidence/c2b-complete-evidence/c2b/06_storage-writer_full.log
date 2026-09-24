@@ -1,0 +1,5 @@
+2026-09-13T12:41:33.275926214Z {"timestamp": "2026-09-13T12:41:33.275+00:00", "level": "INFO", "component": "storage_writer", "message": "broker connected", "event": "connected"}
+2026-09-13T12:41:33.276455720Z {"timestamp": "2026-09-13T12:41:33.276+00:00", "level": "INFO", "component": "storage_writer", "message": "storage writer started", "event": "started", "topic": "twin/boiler_01/telemetry", "bucket": "telemetry", "qos": 1}
+2026-09-14T06:58:37.971975503Z {"timestamp": "2026-09-14T06:58:37.971+00:00", "level": "WARNING", "component": "storage_writer", "message": "broker disconnected", "event": "disconnected", "expected": false, "reason_code": 141}
+2026-09-14T06:58:37.973406185Z {"timestamp": "2026-09-14T06:58:37.971+00:00", "level": "WARNING", "component": "storage_writer", "message": "broker disconnected", "event": "disconnected", "expected": false, "reason_code": 141}
+2026-09-14T06:58:39.061384054Z {"timestamp": "2026-09-14T06:58:39.060+00:00", "level": "INFO", "component": "storage_writer", "message": "broker connected", "event": "connected"}

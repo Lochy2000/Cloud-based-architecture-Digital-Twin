@@ -1,0 +1,20 @@
+=== C1 environment evidence ===
+2026-09-13T11:50:59+00:00
+71f444ed14efee24a8f24c399782cc8862e8aad9
+ M deploy/mosquitto/passwd
+instance-id: i-04611664b99bc5cea
+instance-type: t3.small
+ami-id: ami-07f936ee1f9a0de0e
+placement/availability-zone: eu-west-2c
+local-ipv4: 172.31.15.161
+public-ipv4: 18.134.9.84
+security-groups: c1-digital-twin-sg
+Description:	Ubuntu 24.04.5 LTS
+Linux 7.0.0-1012-aws x86_64
+Docker version 29.8.0, build 88096ef
+Docker Compose version v5.5.1
+Python 3.12.3
+2
+               total        used        free      shared  buff/cache   available
+Mem:           1.9Gi       709Mi       180Mi       3.2Mi       1.2Gi       1.2Gi
+/dev/root        19G  5.1G   14G  28% /

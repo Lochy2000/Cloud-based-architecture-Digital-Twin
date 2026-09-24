@@ -1,0 +1,2 @@
+configuration,compose_project,mode,trial,started_at,outage_seconds,detection_seconds,recovery_seconds,messages_expected,messages_stored,messages_lost,restored_at,recovery_actions,delivery_timeout_seconds,notes
+c2b,digital-twin-c2b,broker,1,2026-09-15T14:04:45.151541+00:00,150.0,75.835,29.832,7,7,0,2026-09-15T14:07:15.473204+00:00,"[""docker network connect digital-twin-c2b_default f11bd3cf5d8e5c5e950b66a789fdcd56041490700ccef826ca6b2d62cfe5594d""]",90.0,

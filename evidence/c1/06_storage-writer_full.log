@@ -1,0 +1,2 @@
+2026-09-13T11:46:07.557526091Z {"timestamp": "2026-09-13T11:46:07.557+00:00", "level": "INFO", "component": "storage_writer", "message": "broker connected", "event": "connected"}
+2026-09-13T11:46:07.557783949Z {"timestamp": "2026-09-13T11:46:07.557+00:00", "level": "INFO", "component": "storage_writer", "message": "storage writer started", "event": "started", "topic": "twin/boiler_01/telemetry", "bucket": "telemetry", "qos": 1}
