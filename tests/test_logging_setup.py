@@ -1,11 +1,4 @@
-"""
-Tests for src/twin/logging_setup.py.
-
-Evidence for Stage 1's acceptance test: a log line is valid JSON with an
-ISO-8601, millisecond-precision, UTC timestamp — a precondition for
-M3.1-M3.3 (detection/recovery time measurements). Also covers the
-handler-duplication guard and the LOG_LEVEL environment fallback (D-18).
-"""
+"""JSON logging setup and the bits we rely on in production."""
 
 import json
 
@@ -21,6 +14,7 @@ def _read_json_lines(capsys):
 class TestSetupLogging:
 
     def test_log_line_is_valid_json_with_required_fields(self, capsys):
+        # Log line is valid JSON with required fields.
         logger = setup_logging("test.basic_fields")
         logger.info("connected to broker")
 
@@ -32,6 +26,7 @@ class TestSetupLogging:
         assert "timestamp" in record
 
     def test_timestamp_is_iso8601_utc_with_millisecond_precision(self, capsys):
+        # Timestamp is ISO 8601 UTC with millisecond precision.
         logger = setup_logging("test.timestamp_format")
         logger.info("tick")
 
@@ -44,6 +39,7 @@ class TestSetupLogging:
         assert len(fractional) == 3  # milliseconds, e.g. ...22.123+00:00
 
     def test_extra_fields_are_merged_into_payload(self, capsys):
+        # Extra fields are merged into payload.
         logger = setup_logging("test.extra_fields")
         logger.info("reconnect attempt", extra={"asset_id": "boiler_01", "attempt": 3})
 
@@ -53,6 +49,7 @@ class TestSetupLogging:
         assert record["attempt"] == 3
 
     def test_exception_info_is_captured(self, capsys):
+        # Exception info is captured.
         logger = setup_logging("test.exception_info")
         try:
             raise ValueError("broker connection refused")
@@ -66,6 +63,7 @@ class TestSetupLogging:
         assert "broker connection refused" in record["exception"]
 
     def test_repeated_setup_does_not_duplicate_handlers(self, capsys):
+        # Repeated setup does not duplicate handlers.
         setup_logging("test.no_duplicates")
         logger = setup_logging("test.no_duplicates")  # called again, same component
         logger.info("single line expected")
@@ -73,6 +71,7 @@ class TestSetupLogging:
         assert len(_read_json_lines(capsys)) == 1
 
     def test_explicit_level_overrides_default(self, capsys):
+        # Explicit level overrides default.
         logger = setup_logging("test.explicit_level", level="WARNING")
         logger.info("should be suppressed")
         logger.warning("should appear")
@@ -82,6 +81,7 @@ class TestSetupLogging:
         assert records[0]["message"] == "should appear"
 
     def test_log_level_env_var_used_when_no_explicit_level(self, monkeypatch, capsys):
+        # Log level env var used when no explicit level.
         monkeypatch.setenv("LOG_LEVEL", "ERROR")
 
         logger = setup_logging("test.env_level")
@@ -93,6 +93,7 @@ class TestSetupLogging:
         assert records[0]["message"] == "should appear"
 
     def test_default_level_is_info_when_nothing_specified(self, capsys):
+        # Default level is info when nothing specified.
         logger = setup_logging("test.default_level")
         logger.debug("should be suppressed")
         logger.info("should appear")
@@ -102,5 +103,6 @@ class TestSetupLogging:
         assert records[0]["message"] == "should appear"
 
     def test_does_not_propagate_to_root_logger(self):
+        # Does not propagate to root logger.
         logger = setup_logging("test.no_propagate")
         assert logger.propagate is False
