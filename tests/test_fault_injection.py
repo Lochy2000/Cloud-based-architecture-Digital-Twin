@@ -1,4 +1,4 @@
-"""Focused tests for fault-injection measurement behavior."""
+"""Fault-injection runs, recovery, and message-loss accounting."""
 
 from unittest.mock import patch
 
@@ -19,6 +19,7 @@ from experiments import fault_injection as fi
 
 
 def test_delivery_waits_for_final_sequence_without_moving_bounds():
+    # Delivery waits for final sequence without moving bounds.
     start = datetime(2026, 9, 15, tzinfo=timezone.utc)
     stop = start + timedelta(seconds=30)
     with patch.object(fi, "stored_sequences", side_effect=[{1}, {1, 2}]) as query, \
@@ -29,6 +30,7 @@ def test_delivery_waits_for_final_sequence_without_moving_bounds():
 
 
 def test_delivery_timeout_reports_only_observed_sequences():
+    # Delivery timeout reports only observed sequences.
     start = datetime(2026, 9, 15, tzinfo=timezone.utc)
     with patch.object(fi, "stored_sequences", return_value={1}), \
          patch.object(fi.time, "monotonic", side_effect=[0, 10]):
@@ -36,12 +38,14 @@ def test_delivery_timeout_reports_only_observed_sequences():
 
 
 def test_database_error_is_not_reported_as_message_loss():
+    # Database error is not reported as message loss.
     with patch.object(fi, "stored_sequences", side_effect=RuntimeError("unavailable")):
         with pytest.raises(RuntimeError, match="unavailable"):
             fi.wait_for_delivery(None, None, {1}, 10)
 
 
 def test_recovery_requires_database_delivery_after_restore():
+    # Recovery requires database delivery after restore.
     restored = datetime(2026, 9, 15, tzinfo=timezone.utc)
     with patch.object(fi, "stored_sequences", side_effect=[set(), {5}]) as query, \
          patch.object(fi.time, "sleep"), \
@@ -52,6 +56,7 @@ def test_recovery_requires_database_delivery_after_restore():
 
 @pytest.mark.parametrize("mode", ["storage", "broker", "network"])
 def test_interrupted_outage_restores_target(mode):
+    # Interrupted outage restores target.
     snapshot = {"timestamp": "2026-09-15T00:00:00+00:00", "sequence": 0}
     with patch.object(fi, "publisher_snapshot", return_value=snapshot), \
          patch.object(fi, "container_id", return_value="publisher-id"), \
@@ -70,6 +75,7 @@ def test_interrupted_outage_restores_target(mode):
 
 
 def test_trial_includes_final_timestamp_and_records_recovery_action():
+    # Trial includes final timestamp and records recovery action.
     stamp = "2026-09-15T00:00:00+00:00"
     snapshots = [{"timestamp": stamp, "sequence": n} for n in (0, 2)]
     with patch.object(fi, "publisher_snapshot", side_effect=snapshots), \
@@ -88,6 +94,7 @@ def test_trial_includes_final_timestamp_and_records_recovery_action():
 
 @pytest.mark.parametrize("configuration", ["c1", "c2a", "c2b"])
 def test_compose_explicitly_targets_project_and_configuration(configuration):
+    # Compose explicitly targets project and configuration.
     with patch.object(fi, "CONFIGURATION", configuration), \
          patch.object(fi, "COMPOSE_PROJECT", "cloud-run"), \
          patch.object(fi, "ENV_FILE", "selected.env"), patch.object(fi, "run") as run:
@@ -99,16 +106,19 @@ def test_compose_explicitly_targets_project_and_configuration(configuration):
 
 
 def test_default_outage_exceeds_two_sixty_second_keepalives():
+    # The default outage lasts longer than two keepalive windows.
     assert DEFAULT_OUTAGE_SECONDS > 120
 
 
 def test_container_network_reads_the_attached_network():
+    # Container network reads the attached network.
     result = type("Result", (), {"stdout": '{"digital-twin_default": {}}'})()
     with patch("experiments.fault_injection.run", return_value=result):
         assert container_network("publisher-id") == "digital-twin_default"
 
 
 def test_network_commands_disconnect_and_connect_the_container():
+    # Network commands disconnect and connect the container.
     with patch("experiments.fault_injection.container_id", return_value="publisher-id"), \
          patch("experiments.fault_injection.container_network", return_value="twin-network"), \
          patch("experiments.fault_injection.run") as command:
@@ -125,10 +135,12 @@ def test_network_commands_disconnect_and_connect_the_container():
 
 
 def test_trial_columns_exclude_inspected_recovery_actions():
+    # Trial columns exclude inspected recovery actions.
     assert "manual_actions" not in FIELDNAMES
 
 
 def test_write_recovered_can_mark_trial_resumption():
+    # A write-recovered event can mark when the trial resumed.
     recovered_at = datetime(2026, 9, 9, 12, 0, tzinfo=timezone.utc)
     entries = [
         {"event": "write_recovered", "timestamp": recovered_at.isoformat()},
@@ -138,6 +150,7 @@ def test_write_recovered_can_mark_trial_resumption():
 
 
 def test_sequence_reconciliation_counts_genuine_loss():
+    # Sequence reconciliation counts genuine loss.
     assert reconcile_sequences(99, 104, {100, 101, 103, 104}) == {
         "messages_expected": 5,
         "messages_stored": 4,
@@ -146,6 +159,7 @@ def test_sequence_reconciliation_counts_genuine_loss():
 
 
 def test_sequence_reconciliation_ignores_order_and_duplicates():
+    # Sequence reconciliation ignores order and duplicates.
     stored = {104, 102, 101, 100}
     assert reconcile_sequences(99, 104, stored) == {
         "messages_expected": 5,
@@ -155,6 +169,7 @@ def test_sequence_reconciliation_ignores_order_and_duplicates():
 
 
 def test_sequence_reconciliation_counts_late_redelivery_as_stored():
+    # Sequence reconciliation counts late redelivery as stored.
     assert reconcile_sequences(99, 102, {100, 102, 101}) == {
         "messages_expected": 3,
         "messages_stored": 3,
