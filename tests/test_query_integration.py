@@ -1,4 +1,4 @@
-"""Opt-in integration tests for the shared InfluxDB query functions."""
+"""A quick end-to-end check against InfluxDB."""
 
 import os
 from datetime import datetime, timedelta, timezone
@@ -42,6 +42,7 @@ def temporary_bucket():
 
 
 def test_queries_known_points_and_empty_window(temporary_bucket):
+    # Queries known points and empty window.
     client, bucket, org = temporary_bucket
     write_api = client.write_api(write_options=SYNCHRONOUS)
     start = datetime.now(timezone.utc).replace(microsecond=0)
