@@ -1,10 +1,4 @@
-"""
-Tests for src/twin/simulator.py.
-
-Evidence for Stage 3 acceptance: simulator is a pure function of timestamp
-and ambient temp, produces correct supply/return readings via Newton's law,
-boiler on/off state is deterministic from duty cycle, no stored state.
-"""
+"""Boiler simulation behaviour across a full heating cycle."""
 
 from datetime import datetime, timezone, timedelta
 import math
@@ -41,6 +35,7 @@ def _timestamp(hour, minute=0, second=0):
 class TestOutsideOperatingHours:
 
     def test_returns_ambient_before_start(self, boiler_config):
+        # Returns ambient before start.
         ts = _timestamp(5, 30)
         result = simulate(boiler_config, ts, 15.0)
 
@@ -50,6 +45,7 @@ class TestOutsideOperatingHours:
         assert result["ambient_temperature_c"] == 15.0
 
     def test_returns_ambient_after_end(self, boiler_config):
+        # Returns ambient after end.
         ts = _timestamp(23, 0)
         result = simulate(boiler_config, ts, 12.0)
 
@@ -60,6 +56,7 @@ class TestOutsideOperatingHours:
 class TestBoilerOnOff:
 
     def test_boiler_on_in_first_half_of_cycle(self, boiler_config):
+        # The boiler is on during the first half of a cycle.
         # 6am + 5 minutes into the day = first on period (cycle is 20 min, 50% on)
         ts = _timestamp(6, 5)
         result = simulate(boiler_config, ts, 15.0)
@@ -67,6 +64,7 @@ class TestBoilerOnOff:
         assert result["power_draw_kw"] == 5.0
 
     def test_boiler_off_in_second_half_of_cycle(self, boiler_config):
+        # The boiler is off during the second half of a cycle.
         # 6am + 15 minutes = in the off period
         ts = _timestamp(6, 15)
         result = simulate(boiler_config, ts, 15.0)
@@ -74,6 +72,7 @@ class TestBoilerOnOff:
         assert result["power_draw_kw"] == 0.0
 
     def test_boiler_cycles_predictably(self, boiler_config):
+        # Boiler cycles predictably.
         # Times safely within each on/off state, not at boundaries
         times_and_expected_power = [
             (_timestamp(6, 5), 5.0),   # 300s: in on period
@@ -91,6 +90,7 @@ class TestBoilerOnOff:
 class TestNewtonsCooling:
 
     def test_supply_temp_on_is_higher_than_baseline(self, boiler_config):
+        # Supply temperature rises above baseline while heating.
         # Boiler on should have supply temp rising toward setpoint (65°C)
         ts = _timestamp(6, 5)  # In on period
         result = simulate(boiler_config, ts, 15.0)
@@ -105,6 +105,7 @@ class TestNewtonsCooling:
 
     #     assert result["supply_temperature_c"] <= 20.0
     def test_supply_temp_decays_gradually_when_off(self, boiler_config):
+        # Supply temp decays gradually when off.
         # Cooling is exponential from the end-of-heating temperature toward
         # ambient, not an instant drop. Values fall as time in the off phase grows.
         one_minute_off = simulate(boiler_config, _timestamp(6, 11), 15.0)
@@ -116,6 +117,7 @@ class TestNewtonsCooling:
         assert nine_minutes_off["supply_temperature_c"] > 20.0
 
     def test_return_temperature_delta_preserved(self, boiler_config):
+        # Keeps the expected gap between supply and return temperatures.
         # Return should always be supply - 10°C
         ts = _timestamp(6, 5)
         result = simulate(boiler_config, ts, 15.0)
@@ -124,6 +126,7 @@ class TestNewtonsCooling:
         assert abs(delta - 10.0) < 0.1
 
     def test_exponential_approach_heating(self, boiler_config):
+        # Heating follows the expected exponential curve.
         # At t = one time constant, temp should reach ~63% of the way to target
         # tau_heat = 25s, so at 25s into an on period:
         # T = 65 + (20 - 65) * exp(-25/25) = 65 - 45*exp(-1) = 65 - 16.55 ≈ 48.5
@@ -147,12 +150,14 @@ class TestNewtonsCooling:
 class TestAmbientsAndSetpoint:
 
     def test_setpoint_always_reported(self, boiler_config):
+        # Setpoint always reported.
         ts = _timestamp(6, 0)
         result = simulate(boiler_config, ts, 15.0)
 
         assert result["setpoint_c"] == 65.0
 
     def test_ambient_temperature_passed_through(self, boiler_config):
+        # Ambient temperature passed through.
         ts = _timestamp(6, 0)
         result = simulate(boiler_config, ts, 12.5)
 
@@ -162,11 +167,13 @@ class TestAmbientsAndSetpoint:
 class TestTimezoneValidation:
 
     def test_rejects_naive_timestamp(self, boiler_config):
+        # Rejects naive timestamp.
         ts = datetime(2026, 8, 20, 6, 0, 0)  # No tzinfo
         with pytest.raises(ValueError, match="UTC"):
             simulate(boiler_config, ts, 15.0)
 
     def test_rejects_non_utc_timezone(self, boiler_config):
+        # Rejects non UTC timezone.
         from datetime import timedelta
         bst = timezone(timedelta(hours=1))
         ts = datetime(2026, 8, 20, 6, 0, 0, tzinfo=bst)
@@ -183,6 +190,7 @@ class TestTimezoneValidation:
     #     assert first["supply_temperature_c"] == second["supply_temperature_c"]
 
     def test_later_cycle_starts_warmer_than_cold_start(self, boiler_config):
+        # Later cycle starts warmer than cold start.
         first_cycle = simulate(
             boiler_config,
             _timestamp(6, 0),
