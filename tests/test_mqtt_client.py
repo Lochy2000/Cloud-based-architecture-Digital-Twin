@@ -1,10 +1,5 @@
 """
-Tests for src/twin/mqtt_client.py.
 
-These verify the client is constructed correctly — credentials, certificates,
-QoS-derived session persistence, reconnect bounds, callbacks — without a live
-broker. Connecting to Mosquitto, HiveMQ Cloud and AWS IoT Core is Stage 4's
-integration acceptance and cannot be covered here.
 """
 
 from unittest.mock import MagicMock, patch
