@@ -1,4 +1,4 @@
-"""Focused tests for the clean deployment timing harness."""
+"""Small checks around deployment timing and cleanup."""
 
 from pathlib import Path
 from unittest.mock import patch
@@ -9,6 +9,7 @@ from experiments.deployment_timer import compose_command, measure_trial
 
 
 def test_c1_compose_command_includes_profile_before_subcommand():
+    # C1 compose command includes profile before subcommand.
     command = compose_command("c1", Path("c1.env"), "timing-c1", "up", "--detach")
 
     assert command == [
@@ -21,6 +22,7 @@ def test_c1_compose_command_includes_profile_before_subcommand():
 
 
 def test_managed_compose_command_has_no_local_broker_profile():
+    # Managed compose command has no local broker profile.
     command = compose_command("c2a", Path("c2a.env"), "timing-c2a", "up")
 
     assert "--profile" not in command
@@ -33,6 +35,7 @@ def test_managed_compose_command_has_no_local_broker_profile():
 def test_trial_times_startup_and_query_and_cleans_both_sides(
     monotonic, clean, compose, wait
 ):
+    # Times both startup and query, then cleans up both stacks.
     result = measure_trial(
         "c1", Path("c1.env"), "timing-c1", {}, timeout=60, poll_interval=0.25
     )
@@ -50,6 +53,7 @@ def test_trial_times_startup_and_query_and_cleans_both_sides(
 @patch("experiments.deployment_timer.clean_stack")
 @patch("experiments.deployment_timer.time.monotonic", side_effect=[10.0, 11.0])
 def test_trial_cleans_after_measurement_failure(monotonic, clean, compose, wait):
+    # Trial cleans after measurement failure.
     with pytest.raises(TimeoutError):
         measure_trial(
             "c1", Path("c1.env"), "timing-c1", {}, timeout=60, poll_interval=0.25
