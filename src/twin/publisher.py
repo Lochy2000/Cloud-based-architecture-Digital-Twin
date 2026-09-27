@@ -1,14 +1,4 @@
-"""
-Publisher entrypoint.
-simulates one asset and publishes an aggregated telemetry message on a fixed
-interval. Deliberately thin; simulation, schema and connection logic all live
-in their own modules.
-
-scheduling is monotonic: each tick's target is computed from a fixed start
-point rather than by sleeping a fixed duration, so message count over 24 hours
-does not drift below nominal. Message count is a cost-model input, so drift is
-a measurement error rather than an inconvenience.
-"""
+"""Simulate one asset and publish its telemetry on a fixed interval."""
 
 import os
 import signal
@@ -28,21 +18,14 @@ from twin.simulator import simulate
 COMPONENT = "publisher"
 PROGRESS_EVERY_MESSAGES = 20
 
-# external air temperature. Held constant in the base case: the framework
-# states cost and complexity measures are insensitive to telemetry realism,
-# and a varying ambient would add a second source of variation between runs.
+# Fixed so runs stay comparable.
 AMBIENT_TEMPERATURE_C = 12.0
 
 _shutdown_requested = False
 _snapshot_requested = False
 
 def _handle_shutdown(signum, frame):
-    """
-    without this the process is killed
-    outright, the client never sends DISCONNECT, and the broker records an
-    unexpected drop; indistinguishable from the failures fault injection is
-    meant to produce.
-    """
+    """Leave enough time for MQTT to send a clean disconnect."""
     global _shutdown_requested
     _shutdown_requested = True
 
@@ -54,15 +37,7 @@ def topic_for(asset_id: str) -> str:
     return f"twin/{asset_id}/telemetry"
 
 def next_tick_delay(start: float, sequence: int, interval: float, now: float) -> float:
-    """
-    seconds to wait before publishing message number `sequence`.
-
-    targets are absolute offsets from a fixed origin, so per-tick work never
-    accumulates into drift
-    negative result means the tick was missed;
-    the nominal message count was not met, which matters because message
-    count is a cost-model input
-    """
+    """Return the delay to an absolute tick, or a negative value if it was missed."""
     return start + (sequence * interval) - now
 
 def sleep_duration(deadline: float, now: float) -> float:
@@ -153,16 +128,13 @@ def run() -> int:
 
         sequence += 1
 
-        # next tick is measured from the fixed start point, not from now
-        # next_tick = start + (sequence * interval)
-        # remaining = next_tick - time.monotonic()
+        # Always schedule from the original start so slow ticks do not add drift.
         remaining = next_tick_delay(start, sequence, interval, time.monotonic())
 
         overran = remaining < 0
         if overran:
             overruns += 1
-            #  tick was missed entirely; record it rather than silently
-            # skipping, since it means the nominal message count was not met.
+            # Keep overruns visible in the experiment results.
             logger.warning(
                 "tick overran interval",
                 extra={"event": "tick_overrun", "sequence": sequence, "late_by_seconds": -remaining},
@@ -197,8 +169,7 @@ def run() -> int:
         if overran:
             continue
 
-        # sleep in short slices so a shutdown signal is acted on promptly
-        # rather than after a full interval
+        # Short sleeps keep shutdown responsive even with a long interval.
         deadline = time.monotonic() + remaining
         while time.monotonic() < deadline and not _shutdown_requested:
             time.sleep(sleep_duration(deadline, time.monotonic()))

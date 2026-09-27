@@ -1,14 +1,4 @@
-"""
-Storage writer entrypoint
-
-Subscribes to the telemetry topic, validates each message against the payload
-schema, and writes it to InfluxDB. Uses the same connection factory as the
-publisher, so reconnect behaviour is identical on both sides 
-
-sequence gaps are detected and logged here rather than reconstructed from
-stored data afterwards, which is what makes message loss measurable per
-trial instead of only in aggregate
-"""
+"""Validate MQTT telemetry and write it to InfluxDB."""
 
 import os
 import signal
@@ -48,17 +38,8 @@ def attach_subscription_callback(client, topic: str, qos: int) -> None:
     client.on_connect = on_connect
 
 def to_point(payload: TelemetryPayload) -> Point:
-    """
-    a validated payload onto an InfluxDB point.
-
-    asset_id is a tag (indexed, used for filtering); the five channels are
-    fields (the measured values). sequence is a field rather than a tag: it is
-    unique per message, and a tag with unbounded cardinality would degrade
-    InfluxDB performance badly.
-
-    The timestamp comes from the payload, not from arrival time, so a message
-    redelivered after a broker outage is stored at the instant it was measured.
-    """
+    """Turn a validated payload into an InfluxDB point."""
+    # Sequence stays a field; using it as a tag would create unbounded cardinality.
     point = (
         Point(MEASUREMENT)
         .tag("asset_id", payload.asset_id)
@@ -70,22 +51,13 @@ def to_point(payload: TelemetryPayload) -> Point:
     return point
 
 class SequenceTracker:
-    """
-    tracks the last sequence number seen per asset and reports gaps.
-
-    A gap means messages were lost in transit. Under QoS 1 this should be rare
-    and is itself a finding; under QoS 0 it is the expected outcome of a broker
-    outage and is the measurement.
-    """
+    """Track the last sequence per asset and report gaps."""
 
     def __init__(self):
         self._last = {}
 
     def check(self, asset_id: str, sequence: int) -> int:
-        """
-        returns the number of messages missing before this one. Zero means
-        contiguous, or that this is the first message seen for the asset.
-        """
+        """Return how many messages are missing before this one."""
         previous = self._last.get(asset_id)
         self._last[asset_id] = sequence
 
@@ -167,13 +139,7 @@ def handle_message(
     logger,
     write_failure_state: WriteFailureState | None = None,
 ) -> bool:
-    """
-    process one received message. will return True if it was stored.
-
-    Never raises: an exception escaping an MQTT callback kills the network loop
-    thread silently, which would look like a broker failure during a trial and
-    corrupt the measurement.
-    """
+    """Process one message and return whether it reached InfluxDB."""
     try:
         payload = parse(raw)
     except PayloadError as exc:
@@ -193,9 +159,7 @@ def handle_message(
     except Exception as exc:
         if write_failure_state is not None:
             write_failure_state.record_failure()
-        # InfluxDB being unreachable is a fault-injection mode in its own right.
-        # message is lost, but the subscriber must keep running so recovery
-        # is observable once storage returns
+        # Keep the callback alive so a storage recovery can still be observed.
         logger.error(
             "influx write failed",
             extra={"event": "write_failed", "sequence": payload.sequence, "error": str(exc)},

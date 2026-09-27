@@ -1,10 +1,4 @@
-"""
-loads per-asset YAML configuration.
-
-separate from config.py because asset parameters describe the simulated
-physical system, not the deployment environment. config.py supplies the path;
-this validates the contents.
-"""
+"""Load and validate the per-asset YAML config."""
 
 import yaml
 

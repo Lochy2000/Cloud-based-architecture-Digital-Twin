@@ -1,16 +1,4 @@
-"""
-Structured JSON logging for the digital twin pipeline.
-
-Serves tp config from environment, fail loudly so errors are
-logged, not swallowed, and directly enables costs evalulation framework, which measure
-detection and recovery times in seconds: that's only possible if every
-log line carries a parseable, millisecond-precision timestamp.
-
-One JSON object per line, to stdout only process doesn't manage
-log files, Docker does (twelve-factor). Every line carries: timestamp
-(UTC, ISO-8601, millisecond precision), level, component (which module
-emitted it), message, plus any extra structured fields the caller adds.
-"""
+"""Write structured JSON logs to stdout for Docker to collect."""
 
 import json
 import logging
@@ -48,16 +36,7 @@ class JSONFormatter(logging.Formatter):
         return json.dumps(payload, default=str)
 
 def setup_logging(component: str, level: str | None = None) -> logging.Logger:
-    """
-    Call once, at process startup, in each entrypoint (publisher.py,
-    storage_writer.py). The logger is named after the component so log
-    lines are attributable when several services' output is read
-    together during fault-injection trials.
-
-    level falls back to the LOG_LEVEL environment variable, then to
-    INFO, keeping this consistent without adding a whole
-    LoggingConfig loader in config.py for one string.
-    """
+    """Set up one component logger without adding duplicate handlers."""
     resolved_level = (level or os.environ.get("LOG_LEVEL", "INFO")).upper()
 
     logger = logging.getLogger(component)
@@ -65,8 +44,7 @@ def setup_logging(component: str, level: str | None = None) -> logging.Logger:
     logger.propagate = False
 
     if logger.handlers:
-        # Guards against duplicate log lines if setup_logging is called
-        # more than once for the same component (happens in tests).
+        # Reusing a component should not double every log line.
         return logger
 
     handler = logging.StreamHandler(sys.stdout)

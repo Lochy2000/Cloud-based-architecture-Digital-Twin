@@ -1,14 +1,4 @@
-"""
-Message schema for the digital twin pipelinethe single source of
-truth for what a telemetry message contains 
-
-mean payload size over 1,000 messages, and message loss detected by gap analysis on
-the sequence number, which is why it is present from the first commit
-rather than added later
-
-No MQTT, no file I/O, no network build_payload() and parse() are
-pure functions over plain Python values and bytes.
-"""
+"""Build, validate, and parse telemetry payloads."""
 
 import json
 from dataclasses import asdict, dataclass
@@ -16,10 +6,7 @@ from datetime import datetime
 
 SCHEMA_VERSION = "1.0"
 
-# The fixed base-case channel set. One
-# non-temperature channel (power draw) so the payload is not
-# homogeneous this tuple is the single place that set is defined 
-# simulator.py and tests both import it rather than re-listing it.
+# Keep the channel list in one place; the simulator and tests use it too.
 CHANNELS = (
     "supply_temperature_c",
     "return_temperature_c",
@@ -47,13 +34,7 @@ class TelemetryPayload:
     setpoint_c: float
 
 def build_payload(asset_id: str, sequence: int, timestamp: datetime, readings: dict) -> TelemetryPayload:
-    """
-    Called by publisher.py once per tick, with the reading set
-    simulator.py's pure function returned. timestamp is a required,
-    explicit argument, not generated here, so the simulator's output
-    and the payload's timestamp always come from the same clock read
-    rather than two datetime.now() calls microseconds apart.
-    """
+    """Build one payload from a simulator reading."""
     if not asset_id or not isinstance(asset_id, str):
         raise PayloadError(f"asset_id must be a non-empty string, got {asset_id!r}")
 
@@ -98,14 +79,7 @@ def serialize(payload: TelemetryPayload) -> bytes:
     return json.dumps(asdict(payload), sort_keys=True).encode("utf-8")
 
 def parse(raw: bytes) -> TelemetryPayload:
-    """
-    called by storage_writer.py on every message received off the
-    wire. Unlike build_payload, this is the pipeline's boundary with
-    untrusted input e.g a corrupted message, a schema-version mismatch,
-    or  a deliberately malformed payload all
-    to fail here with a named reason, not an unhandled exception
-    inside the MQTT callback.
-    """
+    """Parse wire data and reject anything outside the current schema."""
     try:
         data = json.loads(raw.decode("utf-8"))
     except (json.JSONDecodeError, UnicodeDecodeError) as exc:
