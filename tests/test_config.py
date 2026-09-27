@@ -1,10 +1,4 @@
-"""
-Tests for src/twin/config.py.
-
-Evidence for Stage 1's acceptance test: a missing or invalid required
-environment variable must raise ConfigError naming that variable, not a
-raw KeyError/ValueError. Serves D-18, D-21.
-"""
+"""Environment config loading, including the usual bad inputs."""
 
 import pytest
 
@@ -42,6 +36,7 @@ def clean_env(monkeypatch):
 class TestLoadBrokerConfig:
 
     def test_password_auth_success(self, monkeypatch):
+        # Loads the normal username/password setup.
         monkeypatch.setenv("BROKER_HOST", "test-broker.example.com")
         monkeypatch.setenv("BROKER_PORT", "8883")
         monkeypatch.setenv("BROKER_TLS", "true")
@@ -63,6 +58,7 @@ class TestLoadBrokerConfig:
         assert cfg.qos == 1    
 
     def test_password_auth_uses_private_ca_when_configured(self, monkeypatch, tmp_path):
+        # Password auth uses private CA when configured.
         ca = tmp_path / "ca.crt"
         ca.write_text("placeholder")
         monkeypatch.setenv("BROKER_HOST", "mosquitto")
@@ -79,6 +75,7 @@ class TestLoadBrokerConfig:
         assert cfg.ca_cert == str(ca)
 
     def test_cert_auth_success(self, monkeypatch, tmp_path):
+        # Loads the certificate-based setup.
         ca = tmp_path / "ca.pem"
         cert = tmp_path / "client.pem"
         key = tmp_path / "client.key"
@@ -101,6 +98,7 @@ class TestLoadBrokerConfig:
         assert cfg.ca_cert == str(ca)
 
     def test_missing_host_names_the_variable(self, monkeypatch):
+        # A missing host error should name BROKER_HOST.
         monkeypatch.setenv("BROKER_PORT", "8883")
         monkeypatch.setenv("BROKER_TLS", "true")
         monkeypatch.setenv("BROKER_AUTH_MODE", "password")
@@ -111,6 +109,7 @@ class TestLoadBrokerConfig:
             load_broker_config()
 
     def test_non_integer_port_raises_config_error_not_value_error(self, monkeypatch):
+        # A bad port should still come back as a config error.
         monkeypatch.setenv("BROKER_HOST", "test")
         monkeypatch.setenv("BROKER_PORT", "not-a-number")
         monkeypatch.setenv("BROKER_TLS", "true")
@@ -122,6 +121,7 @@ class TestLoadBrokerConfig:
             load_broker_config()
 
     def test_invalid_auth_mode_rejected(self, monkeypatch):
+        # Invalid auth mode rejected.
         monkeypatch.setenv("BROKER_HOST", "test")
         monkeypatch.setenv("BROKER_PORT", "8883")
         monkeypatch.setenv("BROKER_TLS", "true")
@@ -131,6 +131,7 @@ class TestLoadBrokerConfig:
             load_broker_config()
 
     def test_cert_path_that_does_not_exist_is_rejected(self, monkeypatch):
+        # Cert path that does not exist is rejected.
         monkeypatch.setenv("BROKER_HOST", "test")
         monkeypatch.setenv("BROKER_PORT", "8883")
         monkeypatch.setenv("BROKER_TLS", "true")
@@ -143,6 +144,7 @@ class TestLoadBrokerConfig:
             load_broker_config()
 
     def test_missing_qos_names_the_variable(self, monkeypatch):
+        # A missing QoS error should name MQTT_QOS.
         monkeypatch.setenv("BROKER_HOST", "test")
         monkeypatch.setenv("BROKER_PORT", "8883")
         monkeypatch.setenv("BROKER_TLS", "true")
@@ -154,6 +156,7 @@ class TestLoadBrokerConfig:
             load_broker_config()
 
     def test_invalid_qos_rejected(self, monkeypatch):
+        # Invalid QoS rejected.
         monkeypatch.setenv("BROKER_HOST", "test")
         monkeypatch.setenv("BROKER_PORT", "8883")
         monkeypatch.setenv("BROKER_TLS", "true")
@@ -170,6 +173,7 @@ class TestLoadBrokerConfig:
 class TestLoadInfluxConfig:
 
     def test_success(self, monkeypatch):
+        # Loads a complete Influx config.
         monkeypatch.setenv("INFLUX_URL", "http://localhost:8086")
         monkeypatch.setenv("INFLUX_TOKEN", "test-token")
         monkeypatch.setenv("INFLUX_ORG", "digital-twin")
@@ -181,6 +185,7 @@ class TestLoadInfluxConfig:
         assert cfg.bucket == "telemetry"
 
     def test_missing_token_names_the_variable(self, monkeypatch):
+        # A missing token error should name INFLUX_TOKEN.
         monkeypatch.setenv("INFLUX_URL", "http://localhost:8086")
         monkeypatch.setenv("INFLUX_ORG", "digital-twin")
         monkeypatch.setenv("INFLUX_BUCKET", "telemetry")
@@ -194,6 +199,7 @@ class TestLoadInfluxConfig:
 class TestLoadWorkloadConfig:
 
     def test_success(self, monkeypatch, tmp_path):
+        # Loads a valid workload config.
         asset_file = tmp_path / "boiler_01.yaml"
         asset_file.write_text("asset_id: boiler_01")
         monkeypatch.setenv("ASSET_CONFIG_PATH", str(asset_file))
@@ -205,6 +211,7 @@ class TestLoadWorkloadConfig:
         assert cfg.publish_interval_seconds == 30.0
 
     def test_missing_asset_file_is_rejected(self, monkeypatch):
+        # Missing asset file is rejected.
         monkeypatch.setenv("ASSET_CONFIG_PATH", "/nonexistent/asset.yaml")
         monkeypatch.setenv("PUBLISH_INTERVAL_SECONDS", "30")
 
@@ -212,6 +219,7 @@ class TestLoadWorkloadConfig:
             load_workload_config()
 
     def test_zero_interval_is_rejected(self, monkeypatch, tmp_path):
+        # Zero interval is rejected.
         asset_file = tmp_path / "boiler_01.yaml"
         asset_file.write_text("asset_id: boiler_01")
         monkeypatch.setenv("ASSET_CONFIG_PATH", str(asset_file))
@@ -221,6 +229,7 @@ class TestLoadWorkloadConfig:
             load_workload_config()
 
     def test_negative_interval_is_rejected(self, monkeypatch, tmp_path):
+        # Negative interval is rejected.
         asset_file = tmp_path / "boiler_01.yaml"
         asset_file.write_text("asset_id: boiler_01")
         monkeypatch.setenv("ASSET_CONFIG_PATH", str(asset_file))
