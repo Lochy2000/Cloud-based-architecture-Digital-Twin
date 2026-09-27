@@ -1,4 +1,4 @@
-"""Tests for completed-run summary selection and measurement."""
+"""Run-summary measurements and completed-run selection."""
 
 from datetime import datetime, timezone
 from unittest.mock import MagicMock, patch
@@ -16,6 +16,7 @@ from experiments.run_summary import (
 
 
 def test_latest_completed_run_ignores_current_incomplete_run():
+    # Latest completed run ignores current incomplete run.
     entries = [
         {"event": "started", "timestamp": "2026-09-10T08:00:00+00:00"},
         {"event": "stopping", "timestamp": "2026-09-10T08:01:00+00:00"},
@@ -29,17 +30,20 @@ def test_latest_completed_run_ignores_current_incomplete_run():
 
 
 def test_latest_completed_run_requires_a_matched_pair():
+    # Latest completed run requires a matched pair.
     with pytest.raises(RuntimeError, match="no completed run"):
         latest_completed_run([{"event": "started"}])
 
 
 def test_database_volume_converts_kibibytes_to_bytes():
+    # Database volume converts KiB to bytes.
     result = type("Result", (), {"stdout": "123\t/var/lib/influxdb2\n"})()
     with patch("experiments.run_summary.compose", return_value=result):
         assert database_volume_bytes("c1.env") == 123 * 1024
 
 
 def test_publisher_network_counter_reads_exact_container_value():
+    # Publisher network counter reads exact container value.
     container = type("Result", (), {"stdout": "publisher-id\n"})()
     counter = type("Result", (), {"stdout": "8192\n"})()
     with patch("experiments.run_summary.compose", return_value=container), \
@@ -53,6 +57,7 @@ def test_publisher_network_counter_reads_exact_container_value():
 
 
 def test_network_measurements_reject_a_stale_run():
+    # Network measurements reject a stale run.
     capture = {
         "publisher_started_at": "2026-09-10T07:00:00+00:00",
         "tx_start_bytes": 100,
@@ -65,6 +70,7 @@ def test_network_measurements_reject_a_stale_run():
 
 
 def test_network_checkpoint_records_start_and_end_for_one_run(tmp_path):
+    # Network checkpoint records start and end for one run.
     started_at = datetime(2026, 9, 10, 8, 0, tzinfo=timezone.utc)
     started = {"event": "started", "timestamp": started_at.isoformat()}
     capture_file = tmp_path / "network.json"
@@ -92,6 +98,7 @@ def test_network_checkpoint_records_start_and_end_for_one_run(tmp_path):
 def test_create_summary_uses_one_completed_publisher_window(
     logs, env_values, client_class, point_count, time_bounds, cardinality, volume
 ):
+    # Builds the summary from one completed publisher window.
     start = datetime(2026, 9, 10, 8, 0, tzinfo=timezone.utc)
     stop = datetime(2026, 9, 10, 8, 1, tzinfo=timezone.utc)
     logs.return_value = [
