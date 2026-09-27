@@ -1,9 +1,5 @@
 """
-for src/twin/assets.py.
-
-asset YAML is the only file the pipeline reads at runtime, so a malformed
-or incomplete one must fail at startup with a named field rather than
-producing wrong readings silently.
+Asset file loading and the validation around it.
 """
 
 import pytest
@@ -39,6 +35,7 @@ def _write(tmp_path, text, name="boiler_01.yaml"):
 class TestValidAsset:
 
     def test_loads_all_sections(self, tmp_path):
+        # Loads every section from a valid asset file.
         asset = load_asset(_write(tmp_path, VALID_YAML))
 
         assert asset["asset_id"] == "boiler_01"
@@ -47,6 +44,7 @@ class TestValidAsset:
         assert asset["duty_cycle"]["on_fraction"] == 0.5
 
     def test_output_is_accepted_by_simulator(self, tmp_path):
+        # The loaded config can go straight into the simulator.
         # The contract that actually matters: what load_asset returns must be
         # directly usable by simulate() without reshaping.
         from datetime import datetime, timezone
@@ -60,21 +58,25 @@ class TestValidAsset:
 class TestMissingFields:
 
     def test_missing_asset_id(self, tmp_path):
+        # An asset without an ID should fail early.
         text = VALID_YAML.replace("asset_id: boiler_01\n", "")
         with pytest.raises(AssetError, match="asset_id"):
             load_asset(_write(tmp_path, text))
 
     def test_missing_section(self, tmp_path):
+        # Required YAML sections cannot be left out.
         text = VALID_YAML.split("dynamics:")[0]
         with pytest.raises(AssetError, match="dynamics"):
             load_asset(_write(tmp_path, text))
 
     def test_missing_field_names_section_and_field(self, tmp_path):
+        # Missing-field errors should point to the exact setting.
         text = VALID_YAML.replace("  cooling_time_constant_seconds: 600\n", "")
         with pytest.raises(AssetError, match=r"dynamics\.cooling_time_constant_seconds"):
             load_asset(_write(tmp_path, text))
 
     def test_section_that_is_not_a_mapping(self, tmp_path):
+        # Config sections need to be proper YAML mappings.
         text = VALID_YAML.replace(
             "dynamics:\n  heating_time_constant_seconds: 25\n  cooling_time_constant_seconds: 600\n",
             "dynamics: not-a-mapping\n",
@@ -85,16 +87,19 @@ class TestMissingFields:
 class TestInvalidValues:
 
     def test_on_fraction_above_one(self, tmp_path):
+        # Duty-cycle fractions above one are invalid.
         text = VALID_YAML.replace("on_fraction: 0.5", "on_fraction: 1.5")
         with pytest.raises(AssetError, match="on_fraction"):
             load_asset(_write(tmp_path, text))
 
     def test_on_fraction_zero(self, tmp_path):
+        # A zero duty-cycle fraction is not useful here.
         text = VALID_YAML.replace("on_fraction: 0.5", "on_fraction: 0")
         with pytest.raises(AssetError, match="on_fraction"):
             load_asset(_write(tmp_path, text))
 
     def test_operating_hours_reversed(self, tmp_path):
+        # Closing time cannot come before opening time.
         text = VALID_YAML.replace("operating_hours_start: 6", "operating_hours_start: 23")
         with pytest.raises(AssetError, match="operating hours"):
             load_asset(_write(tmp_path, text))
@@ -102,13 +107,16 @@ class TestInvalidValues:
 class TestFileProblems:
 
     def test_missing_file(self):
+        # A missing asset file should give a useful error.
         with pytest.raises(AssetError, match="could not read"):
             load_asset("/nonexistent/boiler.yaml")
 
     def test_invalid_yaml(self, tmp_path):
+        # Broken YAML should be rejected cleanly.
         with pytest.raises(AssetError, match="not valid YAML"):
             load_asset(_write(tmp_path, "asset_id: [unclosed\n"))
 
     def test_yaml_that_is_not_a_mapping(self, tmp_path):
+        # The YAML root needs to be a mapping.
         with pytest.raises(AssetError, match="must be a YAML mapping"):
             load_asset(_write(tmp_path, "- one\n- two\n"))
