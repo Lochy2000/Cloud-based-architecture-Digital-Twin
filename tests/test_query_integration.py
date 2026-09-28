@@ -1,4 +1,8 @@
-"""A quick end-to-end check against InfluxDB."""
+"""A quick end-to-end check against InfluxDB.
+
+AI prompt used: "Write an InfluxDB integration test with two assets that verifies
+  sequences, count, bounds, cardinality, and an empty future window."
+"""
 
 import os
 from datetime import datetime, timedelta, timezone

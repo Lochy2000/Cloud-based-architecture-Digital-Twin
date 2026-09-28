@@ -1,4 +1,11 @@
-"""Shared read queries for telemetry stored in InfluxDB."""
+"""Shared read queries for telemetry stored in InfluxDB.
+
+The query construction follows the InfluxDB Python and Flux documentation at
+https://docs.influxdata.com/influxdb/v2/api-guide/client-libraries/python/.
+AI prompt used:
+"Create reusable InfluxDB Flux query helpers using escaped values and
+  explicit timezone-aware time windows."
+"""
 
 import json
 from datetime import datetime, timezone
