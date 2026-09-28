@@ -1,6 +1,6 @@
 # Grafana dashboard
 
-[Live dashboard for config 1]
+### Live dashboard for config 1
 <img width="933" height="467" alt="image" src="https://github.com/user-attachments/assets/f6e14f9f-d246-49f3-9d6e-1881989d8617" />
 
 
