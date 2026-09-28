@@ -1,4 +1,9 @@
-"""Write structured JSON logs to stdout for Docker to collect."""
+"""Write structured JSON logs to stdout for Docker to collect.
+
+This follows https://docs.python.org/3/library/logging.html. AI prompt used:
+"Create a Python logging formatter that writes one JSON object per
+  line, preserves extra fields, and formats timestamps in UTC milliseconds."
+"""
 
 import json
 import logging
