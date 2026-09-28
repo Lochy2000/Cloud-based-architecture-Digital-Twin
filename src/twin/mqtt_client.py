@@ -1,4 +1,11 @@
-"""Shared MQTT setup for the publisher and storage writer."""
+"""Shared MQTT setup for the publisher and storage writer.
+
+The client and callback behaviour follows the Paho documentation at
+https://eclipse.dev/paho/files/paho.mqtt.python/html/client.html. AI prompt used:
+"Build a shared Paho MQTT v2 client helper supporting password and
+  certificate authentication, bounded reconnect backoff, and a timed wait for
+  the initial CONNACK without losing the normal on_connect callback."
+"""
 
 import ssl
 import threading
@@ -85,6 +92,9 @@ def _attach_logging_callbacks(client: mqtt.Client, logger, component: str) -> No
 def connect(client: mqtt.Client, config: BrokerConfig, timeout: float = 10.0) -> None:
     """Connect, wait for CONNACK, then leave Paho's network loop running."""
     connected = threading.Event()
+    # AI prompt used: "Temporarily wrap
+    # on_connect to signal initial CONNACK, then
+    # restore the existing lifecycle callback after connection succeeds."
     original_on_connect = client.on_connect
 
     def on_connect_wrapper(client, userdata, flags, reason_code, properties):

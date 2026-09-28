@@ -1,5 +1,7 @@
-"""
+"""Tests for MQTT client construction and lifecycle handling.
 
+AI prompt used: "Write a pytest test that fires a successful Paho CONNACK callback
+  and verifies connect() restores the client's original on_connect callback."
 """
 
 from unittest.mock import MagicMock, patch
