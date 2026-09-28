@@ -1,4 +1,10 @@
-"""Read and validate the environment settings used by each service."""
+"""Read and validate the environment settings used by each service.
+
+The environment handling follows https://docs.python.org/3/library/os.html#os.environ
+and https://12factor.net/config. AI prompt used: "Design typed Python configuration
+loaders that validate only the
+  environment variables required by each service and raise named errors."
+"""
 
 import os
 from dataclasses import dataclass
