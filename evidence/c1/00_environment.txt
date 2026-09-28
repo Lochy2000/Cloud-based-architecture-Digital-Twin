@@ -2,13 +2,13 @@
 2026-09-13T11:50:59+00:00
 71f444ed14efee24a8f24c399782cc8862e8aad9
  M deploy/mosquitto/passwd
-instance-id: i-04611664b99bc5cea
+instance-id: [REDACTED]
 instance-type: t3.small
 ami-id: ami-07f936ee1f9a0de0e
 placement/availability-zone: eu-west-2c
-local-ipv4: 172.31.15.161
-public-ipv4: 18.134.9.84
-security-groups: c1-digital-twin-sg
+local-ipv4: [REDACTED]
+public-ipv4: [REDACTED]
+security-groups: [REDACTED]
 Description:	Ubuntu 24.04.5 LTS
 Linux 7.0.0-1012-aws x86_64
 Docker version 29.8.0, build 88096ef

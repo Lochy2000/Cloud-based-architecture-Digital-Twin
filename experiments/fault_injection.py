@@ -14,7 +14,7 @@ for the self-hosted configuration the broker is stopped directly. For the
 managed brokers there is no container to stop, so Docker disconnects the
 publisher container from its network instead. The same mechanism is used for
 the network mode across all three configurations, which keeps the comparison
-consistent.
+consistent
 """
 
 import argparse
@@ -105,7 +105,7 @@ def reconcile_sequences(start_sequence: int, end_sequence: int,
         "messages_lost": len(expected - stored),
     }
 
-# --- create the different failuer modes ----------------------------------------------------
+# Failure controls.
 
 def container_network(container: str) -> str:
     """Return the single Docker network attached to a trial container."""
@@ -165,7 +165,7 @@ def stored_sequences(start: datetime, stop: datetime) -> set[int]:
         )
 
 
-#----- run script --------------------------------------------------
+# Trial runner.
 
 def wait_for_delivery(start: datetime, stop: datetime, expected: set[int],
                       timeout: float) -> set[int]:

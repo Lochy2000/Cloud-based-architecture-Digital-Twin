@@ -1,4 +1,6 @@
-"""Create an auditable JSON summary for one completed experiment run."""
+"""
+Create an auditable JSON summary for one completed experiment run.
+"""
 
 import argparse
 import json

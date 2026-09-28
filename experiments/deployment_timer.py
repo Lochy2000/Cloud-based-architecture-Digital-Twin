@@ -1,4 +1,6 @@
-"""Measure clean deployment time from Compose startup to first stored point."""
+"""
+Measure clean deployment time from Compose startup to first stored point
+"""
 
 import argparse
 import json

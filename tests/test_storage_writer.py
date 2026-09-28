@@ -1,10 +1,4 @@
-"""
-ests for src/twin/storage_writer.py.
-
-covers the three pieces that are testable without a live broker or database:
-payload-to-point mapping, sequence gap detection, and the guarantee
-that a bad message or a failed write never escapes the MQTT callback.
-"""
+"""Storage conversion, sequence tracking, and write handling."""
 
 from datetime import datetime, timezone
 from unittest.mock import MagicMock
@@ -42,12 +36,14 @@ def _raw(sequence=0, asset_id="boiler_01"):
 class TestTopic:
 
     def test_matches_publisher_topic(self):
+        # Matches publisher topic.
         # Must agree with publisher.topic_for or nothing is ever received.
         assert topic_for("boiler_01") == "twin/boiler_01/telemetry"
 
 class TestSubscription:
 
     def test_subscribes_after_initial_connect_and_reconnect(self):
+        # Subscribes after initial connect and reconnect.
         client = MagicMock()
         lifecycle_callback = MagicMock()
         client.on_connect = lifecycle_callback
@@ -65,22 +61,26 @@ class TestSubscription:
 class TestToPoint:
 
     def test_asset_id_is_a_tag(self):
+        # Asset ID is a tag.
         line = to_point(_payload()).to_line_protocol()
         assert "asset_id=boiler_01" in line
 
     def test_all_five_channels_are_fields(self):
+        # All five channels are fields.
         line = to_point(_payload()).to_line_protocol()
         for channel in ("supply_temperature_c", "return_temperature_c",
                         "ambient_temperature_c", "power_draw_kw", "setpoint_c"):
             assert channel in line
 
     def test_sequence_is_a_field_not_a_tag(self):
+        # Sequence is a field not a tag.
         # As a tag, sequence would give unbounded cardinality.
         line = to_point(_payload(sequence=4821)).to_line_protocol()
         assert "sequence=4821" in line
         assert ",sequence=" not in line.split(" ")[0]
 
     def test_timestamp_comes_from_payload_not_arrival(self):
+        # Timestamp comes from payload not arrival.
         # 2026-08-20T14:03:22.123Z in milliseconds.
         line = to_point(_payload()).to_line_protocol()
         assert line.endswith("1787234602123")
@@ -88,36 +88,43 @@ class TestToPoint:
 class TestSequenceTracker:
 
     def test_first_message_is_never_a_gap(self):
+        # First message is never a gap.
         assert SequenceTracker().check("boiler_01", 0) == 0
 
     def test_contiguous_messages_report_no_gap(self):
+        # Contiguous messages report no gap.
         tracker = SequenceTracker()
         tracker.check("boiler_01", 0)
         assert tracker.check("boiler_01", 1) == 0
 
     def test_single_missing_message_reported(self):
+        # Single missing message reported.
         tracker = SequenceTracker()
         tracker.check("boiler_01", 0)
         assert tracker.check("boiler_01", 2) == 1
 
     def test_multiple_missing_messages_counted(self):
+        # Multiple missing messages counted.
         tracker = SequenceTracker()
         tracker.check("boiler_01", 10)
         assert tracker.check("boiler_01", 25) == 14
 
     def test_publisher_restart_is_not_counted_as_a_gap(self):
+        # Publisher restart is not counted as a gap.
         # Sequence restarts at 0 when the publisher process restarts.
         tracker = SequenceTracker()
         tracker.check("boiler_01", 500)
         assert tracker.check("boiler_01", 0) == 0
 
     def test_redelivered_message_is_not_a_gap(self):
+        # Redelivered message is not a gap.
         # QoS 1 can redeliver a message already seen.
         tracker = SequenceTracker()
         tracker.check("boiler_01", 5)
         assert tracker.check("boiler_01", 5) == 0
 
     def test_assets_are_tracked_independently(self):
+        # Assets are tracked independently.
         tracker = SequenceTracker()
         tracker.check("boiler_01", 100)
         assert tracker.check("chiller_02", 0) == 0
@@ -126,6 +133,7 @@ class TestSequenceTracker:
 class TestHandleMessage:
 
     def test_valid_message_is_written(self):
+        # Valid message is written.
         write_api = MagicMock()
         stored = handle_message(_raw(), write_api, "telemetry", SequenceTracker(), MagicMock())
 
@@ -134,6 +142,7 @@ class TestHandleMessage:
         assert write_api.write.call_args.kwargs["bucket"] == "telemetry"
 
     def test_malformed_payload_is_discarded_without_raising(self):
+        # Malformed payload is discarded without raising.
         write_api = MagicMock()
         logger = MagicMock()
 
@@ -144,6 +153,7 @@ class TestHandleMessage:
         logger.error.assert_called_once()
 
     def test_wrong_schema_version_is_discarded(self):
+        # Wrong schema version is discarded.
         write_api = MagicMock()
         raw = _raw().replace(b'"1.0"', b'"2.0"')
 
@@ -153,6 +163,7 @@ class TestHandleMessage:
         write_api.write.assert_not_called()
 
     def test_influx_failure_does_not_raise(self):
+        # Influx failure does not raise.
         # An exception escaping the MQTT callback kills the network loop thread,
         # which during a trial would be indistinguishable from broker failure.
         write_api = MagicMock()
@@ -165,6 +176,7 @@ class TestHandleMessage:
         logger.error.assert_called_once()
 
     def test_first_success_after_failures_logs_one_recovery(self):
+        # First success after failures logs one recovery.
         write_api = MagicMock()
         write_api.write.side_effect = [
             Exception("connection refused"),
@@ -195,6 +207,7 @@ class TestHandleMessage:
         }
 
     def test_sequence_gap_is_logged(self):
+        # Sequence gap is logged.
         write_api = MagicMock()
         logger = MagicMock()
         tracker = SequenceTracker()
@@ -206,6 +219,7 @@ class TestHandleMessage:
         assert logger.warning.call_args.kwargs["extra"]["messages_missing"] == 4
 
     def test_gap_does_not_prevent_storage(self):
+        # Gap does not prevent storage.
         # A gap is a finding, not a reason to discard the message that revealed it.
         write_api = MagicMock()
         tracker = SequenceTracker()
