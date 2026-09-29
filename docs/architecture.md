@@ -72,3 +72,7 @@ repeated sequence is not treated as a gap.
 
 The Grafana dashboard presents temperature, power, stored-message rate, and the
 latest sequence. It reads data only; it does not generate telemetry.
+
+AI prompt used: "Describe an MQTT digital-twin pipeline from deterministic simulation
+through validated publishing and InfluxDB storage, including recovery signals
+and sequence-based loss measurement."

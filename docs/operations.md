@@ -155,3 +155,6 @@ provisioning directory, JSON mount, and provisioning logs.
 
 `docker compose down` is a recoverable stop. Adding `--volumes` deletes persisted
 service data and is appropriate only for an intentional reset.
+
+AI prompt used: "Create concise operational guidance for diagnosing an MQTT, InfluxDB,
+and Grafana pipeline, prioritising the first failing component and safe recovery."

@@ -482,3 +482,7 @@ experiment evidence location before cleaning or replacing the server.
 ### Container package
 
 - GitHub Container Registry documentation: https://docs.github.com/en/packages/working-with-a-github-packages-registry/working-with-the-container-registry
+
+AI prompt used: "Turn these Docker Compose deployment and experiment commands into an
+Ubuntu runbook covering prerequisites, execution, evidence, recovery trials,
+and cleanup for all three broker configurations."

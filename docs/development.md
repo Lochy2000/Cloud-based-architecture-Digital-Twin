@@ -62,3 +62,6 @@ invalidate fault measurements.
 Do not commit `.env` files, password databases, private keys, generated samples,
 or service data. Run the full suite and validate the relevant Compose
 configuration before submitting a change.
+
+AI prompt used: "Summarise the development constraints that keep telemetry schema,
+monotonic scheduling, MQTT callbacks, and deployment configuration consistent."
