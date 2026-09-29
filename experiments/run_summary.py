@@ -1,5 +1,8 @@
-"""
-Create an auditable JSON summary for one completed experiment run.
+"""Create an auditable JSON summary for one completed experiment run.
+
+This follows the InfluxDB client and Docker Compose logs documentation.
+AI prompt used: "Create an experiment summary from one matched publisher start/stop
+  window and reject stale or incomplete network checkpoints."
 """
 
 import argparse
@@ -48,6 +51,9 @@ def structured_logs(env_file: str, service: str) -> list[dict]:
 
 def latest_completed_run(entries: list[dict]) -> tuple[dict, dict]:
     """Return the latest matched publisher started/stopping event pair."""
+    # AI prompt used: "Select the latest
+    # completed start/stop pair while ignoring a
+    # newer run that has started but not stopped."
     started = None
     completed = None
     for entry in entries:
@@ -94,6 +100,9 @@ def capture_network_counter(configuration: str, env_file: str,
     container, tx_bytes = publisher_network_tx_bytes(env_file)
     captured_at = datetime.now(timezone.utc).isoformat()
 
+    # AI prompt used: "Store start/end
+    # counters only when configuration, container, and
+    # publisher start time identify the same run."
     if stage == "start":
         capture = {
             "configuration": configuration,

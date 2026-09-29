@@ -1,5 +1,4 @@
-"""
-fault injection trials.
+"""Fault injection trials.
 
 runs three failure modes, three trials each, and records timings to
 recovery_trials.csv. The pipeline must already be running and flowing data
@@ -14,7 +13,12 @@ for the self-hosted configuration the broker is stopped directly. For the
 managed brokers there is no container to stop, so Docker disconnects the
 publisher container from its network instead. The same mechanism is used for
 the network mode across all three configurations, which keeps the comparison
-consistent
+consistent.
+
+The trial design is informed by https://principlesofchaos.org/ and the Docker
+network and InfluxDB client documentation. AI was used to help make outages
+reversible and measure recovery and message loss. Prompt used: "Build repeatable broker, network, and storage fault trials that
+  always restore the target and measure recovery and message loss."
 """
 
 import argparse
@@ -216,6 +220,9 @@ def run_trial(configuration: str, mode: str, trial: int, outage: float,
         container = container_id(PUBLISHER_SERVICE)
         connection = (container_network(container), container)
 
+    # AI prompt used: "Guarantee restoration
+    # with try/finally even when an outage is
+    # interrupted, while recording the recovery action actually performed."
     try:
         if stopped_service:
             stop_service(stopped_service)
@@ -240,6 +247,9 @@ def run_trial(configuration: str, mode: str, trial: int, outage: float,
     restored_at = datetime.now(timezone.utc)
     recovery_seconds = confirmed_recovery(restored_at, settle)
     end_snapshot = publisher_snapshot()
+    # AI helped with this time boundary. Prompt used: "Make an exclusive Flux
+    # stop bound include the final
+    # millisecond-precision payload timestamp, then reconcile expected sequences."
     # Log and payload timestamps have millisecond precision; Flux stop is exclusive.
     window_stop = datetime.fromisoformat(end_snapshot["timestamp"]) + timedelta(milliseconds=1)
     first = int(start_snapshot["sequence"])

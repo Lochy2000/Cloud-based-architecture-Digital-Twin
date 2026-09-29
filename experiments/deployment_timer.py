@@ -1,5 +1,8 @@
-"""
-Measure clean deployment time from Compose startup to first stored point
+"""Measure clean deployment time from Compose startup to first stored point.
+
+This uses the Docker Compose CLI and Python monotonic-clock documentation.
+AI prompt used: "Design a repeatable Docker Compose deployment timer that starts from
+  clean volumes, polls for the first stored point, and always cleans up."
 """
 
 import argparse
@@ -132,6 +135,9 @@ def measure_trial(configuration: str, env_file: Path, project_name: str,
     clean_stack(configuration, env_file, project_name)
     started_at = datetime.now(timezone.utc)
     began = time.monotonic()
+    # AI prompt used: "Use try/finally so isolated
+    # trial resources are removed after
+    # both successful measurements and polling failures."
     try:
         compose(configuration, env_file, project_name, "up", "--detach", "--no-build")
         startup_elapsed = time.monotonic() - began
