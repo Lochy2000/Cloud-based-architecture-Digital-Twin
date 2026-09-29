@@ -1,4 +1,9 @@
-"""Validate MQTT telemetry and write it to InfluxDB."""
+"""Validate MQTT telemetry and write it to InfluxDB.
+
+The MQTT and point-writing behaviour follows the Paho and InfluxDB Python client
+documentation. AI prompt used: "Design an MQTT storage callback that validates telemetry, writes an
+  InfluxDB point, detects sequence gaps, and logs one recovery transition."
+"""
 
 import os
 import signal
@@ -69,6 +74,10 @@ class SequenceTracker:
 
 class WriteFailureState:
     """Track consecutive database write failures until storage recovers."""
+
+    # AI prompt used: "Report recovery only
+    # on the first successful write after one or
+    # more consecutive failures."
 
     def __init__(self):
         self.failures = 0

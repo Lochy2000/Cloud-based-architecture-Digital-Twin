@@ -1,4 +1,9 @@
-"""Build, validate, and parse telemetry payloads."""
+"""Build, validate, and parse telemetry payloads.
+
+The implementation uses Python's json and dataclasses documentation. AI prompt
+used: "Define an immutable telemetry payload with strict field, channel,
+  sequence, timestamp, and schema-version validation for build and parse paths."
+"""
 
 import json
 from dataclasses import asdict, dataclass

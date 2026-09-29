@@ -1,4 +1,10 @@
-"""Simulate one asset and publish its telemetry on a fixed interval."""
+"""Simulate one asset and publish its telemetry on a fixed interval.
+
+The scheduler follows https://docs.python.org/3/library/time.html#time.monotonic.
+AI prompt used: "Implement a
+stoppable telemetry publisher whose tick deadlines are
+  calculated from one monotonic start time rather than repeated fixed sleeps."
+"""
 
 import os
 import signal
@@ -38,6 +44,9 @@ def topic_for(asset_id: str) -> str:
 
 def next_tick_delay(start: float, sequence: int, interval: float, now: float) -> float:
     """Return the delay to an absolute tick, or a negative value if it was missed."""
+    # AI prompt used: "Calculate deadlines
+    # from the original monotonic start so earlier
+    # work cannot accumulate scheduling drift."
     return start + (sequence * interval) - now
 
 def sleep_duration(deadline: float, now: float) -> float:

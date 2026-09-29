@@ -1,4 +1,10 @@
-"""A deterministic boiler simulator using Newton-style heating and cooling."""
+"""A deterministic boiler simulator using Newton-style heating and cooling.
+
+The exponential model is based on Newton's law of cooling, described at
+https://open.lib.umn.edu/app/uploads/sites/230/2020/08/Newton-Law-of-Cooling.pdf.
+AI prompt used: "Implement a pure boiler simulator using exponential heating and
+  cooling, a repeating duty cycle, and a cold start per operating window."
+"""
 
 from datetime import datetime
 import math
@@ -45,6 +51,9 @@ def simulate(asset_config: dict, timestamp: datetime, ambient_temperature: float
     # Cold start at the beginning of each operating day.
     cycle_start_temp = ambient_baseline
 
+    # AI prompt used: "Replay
+    # completed phases mathematically so the current cycle
+    # starts at the correct residual temperature without mutable history."
     # Carry residual heat through the completed cycles.
     for _ in range(completed_cycles):
         end_of_heating = supply_setpoint + (
