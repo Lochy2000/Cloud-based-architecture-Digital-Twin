@@ -1,4 +1,8 @@
-"""Storage conversion, sequence tracking, and write handling."""
+"""Storage conversion, sequence tracking, and write handling.
+
+AI prompt used: "Test that two failed writes followed by successful writes produce
+  exactly one recovery log containing the first recovered sequence."
+"""
 
 from datetime import datetime, timezone
 from unittest.mock import MagicMock

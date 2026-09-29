@@ -1,4 +1,8 @@
-"""Small checks around deployment timing and cleanup."""
+"""Small checks around deployment timing and cleanup.
+
+AI prompt used: "Test that a deployment trial cleans before and after measurement,
+  including when polling for the first point raises TimeoutError."
+"""
 
 from pathlib import Path
 from unittest.mock import patch

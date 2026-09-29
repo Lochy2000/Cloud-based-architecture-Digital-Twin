@@ -1,4 +1,8 @@
-"""Boiler simulation behaviour across a full heating cycle."""
+"""Boiler simulation behaviour across a full heating cycle.
+
+AI prompt used: "Write deterministic pytest cases for a boiler duty cycle, UTC input
+  validation, Newton-style heating, gradual cooling, and residual cycle heat."
+"""
 
 from datetime import datetime, timezone, timedelta
 import math

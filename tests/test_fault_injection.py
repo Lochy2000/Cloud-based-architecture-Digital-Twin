@@ -1,4 +1,8 @@
-"""Fault-injection runs, recovery, and message-loss accounting."""
+"""Fault-injection runs, recovery, and message-loss accounting.
+
+AI prompt used: "Write isolated pytest tests proving every outage mode is restored
+  after interruption and the final sequence timestamp is included."
+"""
 
 from unittest.mock import patch
 

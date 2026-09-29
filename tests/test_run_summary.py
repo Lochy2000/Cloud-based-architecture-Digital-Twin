@@ -1,4 +1,8 @@
-"""Run-summary measurements and completed-run selection."""
+"""Run-summary measurements and completed-run selection.
+
+AI prompt used: "Mock logs, InfluxDB queries, volume size, and network counters to
+  verify that create_summary uses one exact publisher start/stop window."
+"""
 
 from datetime import datetime, timezone
 from unittest.mock import MagicMock, patch
