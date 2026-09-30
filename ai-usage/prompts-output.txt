@@ -1,0 +1,372 @@
+PROMPT INPUT
+Describe an MQTT digital-twin pipeline from deterministic simulation through validated publishing and InfluxDB storage, including recovery signals and sequence-based loss measurement.
+
+OUTPUT
+The system simulates one boiler asset and publishes deterministic telemetry at a fixed interval. The simulator calculates supply temperature, return temperature, ambient temperature, setpoint and power draw from a UTC timestamp and asset configuration. It is a pure function, so identical inputs produce identical readings.
+
+The publisher wraps those readings in a versioned JSON payload containing the asset ID, timestamp and monotonically increasing sequence number. Messages are published to an asset-specific MQTT topic. Scheduling is based on deadlines calculated from one monotonic start time, preventing processing time from accumulating as clock drift.
+
+The MQTT layer supports a local Mosquitto broker, HiveMQ Cloud and AWS IoT Core. Shared client code handles authentication, TLS, reconnect backoff and the initial CONNACK. The storage writer subscribes to telemetry, validates each payload and converts it into an InfluxDB point. The asset ID is stored as a tag, while readings and the sequence number are fields.
+
+Structured logs expose connection, publication, storage and recovery events. Sequence gaps are recorded when received messages skip expected values. Experiments compare the publisher sequence range with sequences stored in InfluxDB to measure message loss. Storage recovery is reported only on the first successful write after one or more failures. Grafana reads stored data and displays temperature, power, message rate and the latest sequence.
+
+
+PROMPT INPUT
+Summarise the development constraints that keep telemetry schema, monotonic scheduling, MQTT callbacks, and deployment configuration consistent.
+
+OUTPUT
+Keep telemetry changes synchronized across the payload schema, simulator, publisher, storage conversion, Flux queries, dashboards and tests. Preserve UTC timestamps and the monotonically increasing sequence field because the experiment tooling uses both to define measurement windows and detect message loss.
+
+Publisher timing must continue to use absolute deadlines derived from one monotonic start time. Repeated fixed sleeps introduce cumulative drift. MQTT lifecycle callbacks must use the Paho v2 callback signatures, and any temporary callback wrapper must restore the original callback after use.
+
+Configuration should remain environment-driven and validated by the service that consumes it. Changes to environment names, broker profiles, Compose services or mounted files must be reflected in the example configuration, Compose files, documentation and tests. Run the relevant unit and integration tests before submitting changes.
+
+
+PROMPT INPUT
+Create concise operational guidance for diagnosing an MQTT, InfluxDB, and Grafana pipeline, prioritising the first failing component and safe recovery.
+
+OUTPUT
+Diagnose the pipeline in data-flow order. First confirm that the publisher container is running and producing structured publication logs. Next check that the MQTT connection succeeds and that the storage writer subscribes to the expected topic. Then inspect storage-writer logs for invalid payloads, sequence gaps or InfluxDB write failures. Query InfluxDB directly before treating a blank Grafana panel as a data-generation failure.
+
+Use container health, structured logs and the most recent sequence values to find the first failing component. A publisher that is not advancing requires publisher or broker investigation. An advancing publisher with no stored points indicates MQTT delivery, validation or database failure. Valid database points with an empty dashboard indicate a Grafana data-source, time-range or panel-query problem.
+
+Recover services using Docker Compose restart or up commands and verify recovery through new stored points. Stopping the stack with docker compose down preserves named-volume data. Use the --volumes option only for an intentional reset because it deletes persisted service data.
+
+
+PROMPT INPUT
+Turn these Docker Compose deployment and experiment commands into an Ubuntu runbook covering prerequisites, execution, evidence, recovery trials, and cleanup for all three broker configurations.
+
+OUTPUT
+The Ubuntu runbook begins by installing Git, Docker Engine and the Compose plugin, cloning the project and creating the required environment files. It explains how to validate the Python tests and Docker Compose configuration before starting an experiment.
+
+The operator selects one broker configuration: C1 starts the local Mosquitto profile, C2a connects the publisher and storage writer to HiveMQ Cloud with username, password and TLS settings, and C2b mounts the AWS IoT Core certificates and uses certificate authentication.
+
+Deployment timing is run from a clean state and records the elapsed time from Compose startup until the first point is available in InfluxDB. For the baseline experiment, the runbook captures the starting network counter, starts the selected stack, records the start time and leaves the system running for 24 hours. It then captures the ending counter and creates a JSON summary using one matched publisher start-and-stop window.
+
+Fault-injection commands cover broker, network and storage outages. Each trial restores the affected service or connection, waits for confirmed data recovery and compares expected publisher sequences with stored sequences to calculate loss. Optional payload-size capture and published-image execution are also described.
+
+The cleanup section distinguishes between stopping containers while preserving evidence and intentionally deleting volumes. Experiment JSON and CSV files, container logs and screenshots should be retained as evidence before destructive cleanup.
+
+
+PROMPT INPUT
+Design a repeatable Docker Compose deployment timer that starts from clean volumes, polls for the first stored point, and always cleans up.
+
+OUTPUT
+The deployment timer validates the selected broker configuration and environment file, prepares the required images, and assigns each trial an isolated Compose project name. Before measurement it removes the trial stack and its volumes. It records a UTC start timestamp and a monotonic start value, starts the stack without rebuilding, and repeatedly queries InfluxDB until a point at or after the trial start is found or the timeout expires.
+
+The result records the UTC start time and the elapsed seconds to the first stored data point. Every trial performs final cleanup in a finally block, so containers, networks and volumes are removed after either a successful measurement or a polling failure. Repeated trial results are written as structured JSON with individual timings and summary statistics.
+
+
+PROMPT INPUT
+Use try/finally so isolated trial resources are removed after both successful measurements and polling failures.
+
+OUTPUT
+try:
+    compose(configuration, env_file, project_name, "up", "--detach", "--no-build")
+    startup_elapsed = time.monotonic() - began
+    query_elapsed = wait_for_first_point(
+        settings, started_at, timeout - startup_elapsed, poll_interval
+    )
+    elapsed = startup_elapsed + query_elapsed
+    return {
+        "started_at": started_at.isoformat(),
+        "seconds_to_first_datapoint": round(elapsed, 3),
+    }
+finally:
+    clean_stack(configuration, env_file, project_name)
+
+
+PROMPT INPUT
+Build repeatable broker, network, and storage fault trials that always restore the target and measure recovery and message loss.
+
+OUTPUT
+The fault-injection tool captures a publisher sequence and timestamp before each outage. Storage mode stops InfluxDB, broker mode stops the local broker, and network mode disconnects the publisher container from its Docker network. The affected target is restored in a finally block even if the trial is interrupted.
+
+After restoration, the tool waits for a recovery event and captures a second publisher snapshot. It extends the exclusive Flux stop boundary by one millisecond so the final payload can be included. Expected sequences are calculated from the two snapshots and compared with sequences retrieved from InfluxDB. The resulting CSV row records the configuration, mode, trial number, outage duration, recovery time, expected message count, stored message count and calculated message loss.
+
+
+PROMPT INPUT
+Guarantee restoration with try/finally even when an outage is interrupted, while recording the recovery action actually performed.
+
+OUTPUT
+try:
+    if stopped_service:
+        stop_service(stopped_service)
+    else:
+        run(["docker", "network", "disconnect", *connection])
+    time.sleep(outage)
+finally:
+    if stopped_service:
+        start_service(stopped_service)
+        recovery_action = f"started {stopped_service}"
+    else:
+        restore_network(*connection)
+        recovery_action = f"reconnected {connection[1]} to {connection[0]}"
+
+
+PROMPT INPUT
+Make an exclusive Flux stop bound include the final millisecond-precision payload timestamp, then reconcile expected sequences.
+
+OUTPUT
+window_stop = datetime.fromisoformat(end_snapshot["timestamp"]) + timedelta(milliseconds=1)
+first = int(start_snapshot["sequence"])
+last = int(end_snapshot["sequence"])
+reconcile_sequences(first, last, set())
+expected = set(range(first + 1, last + 1))
+stored = wait_for_delivery(window_start, window_stop, expected, delivery_timeout)
+loss = reconcile_sequences(first, last, stored)
+
+
+PROMPT INPUT
+Create an experiment summary from one matched publisher start/stop window and reject stale or incomplete network checkpoints.
+
+OUTPUT
+The summary tool reads structured publisher and storage logs, locates the latest completed publisher run and uses its exact start and stop timestamps as the measurement window. It queries InfluxDB for stored point counts and time bounds, measures the database volume size, and counts relevant warning and recovery events.
+
+Network measurements are accepted only when the start and end counters belong to the same configuration, container and publisher run. Missing, incomplete, stale or negative checkpoints are rejected. The final JSON summary contains the configuration, measurement window, duration, publisher sequence range, expected and stored point counts, sequence loss, database size, network bytes and operational event totals.
+
+
+PROMPT INPUT
+Select the latest completed start/stop pair while ignoring a newer run that has started but not stopped.
+
+OUTPUT
+def latest_completed_run(entries: list[dict]) -> tuple[dict, dict]:
+    started = None
+    completed = None
+    for entry in entries:
+        if entry.get("event") == "started":
+            started = entry
+        elif entry.get("event") == "stopping" and started is not None:
+            completed = (started, entry)
+            started = None
+    if completed is None:
+        raise RuntimeError("publisher logs contain no completed run")
+    return completed
+
+
+PROMPT INPUT
+Store start/end counters only when configuration, container, and publisher start time identify the same run.
+
+OUTPUT
+At the start checkpoint, the tool stores the selected configuration, publisher container ID, publisher start timestamp, checkpoint timestamp and transmit-byte counter. At the end checkpoint, it requires an existing start checkpoint and verifies that the configuration, container ID and publisher start timestamp still match. If any value differs, it rejects the checkpoint as stale instead of combining measurements from different runs.
+
+
+PROMPT INPUT
+Design typed Python configuration loaders that validate only the environment variables required by each service and raise named errors.
+
+OUTPUT
+The configuration module defines a ConfigError exception and validation helpers for required strings, integers, floating-point values, booleans, existing files and MQTT QoS values. BrokerConfig, InfluxConfig and WorkloadConfig dataclasses provide typed settings for their respective consumers.
+
+load_broker_config validates the common broker values and then loads only the credentials required by the selected authentication mode. Password mode loads username and password settings. Certificate mode validates the CA, client certificate and private-key files. load_influx_config handles the database URL, token, organisation and bucket. load_workload_config validates the asset configuration path and publish interval. Invalid or missing values raise ConfigError messages that name the affected environment variable.
+
+
+PROMPT INPUT
+Create a Python logging formatter that writes one JSON object per line, preserves extra fields, and formats timestamps in UTC milliseconds.
+
+OUTPUT
+JSONFormatter creates a dictionary containing a UTC millisecond timestamp, log level, component and rendered message. It copies non-reserved LogRecord attributes into that dictionary so structured event details survive formatting. Exception information is added when present, and json.dumps produces one compact JSON object for each log line.
+
+setup_logging creates a stdout stream handler with this formatter, applies the configured log level and disables propagation so Docker receives one structured record per event.
+
+
+PROMPT INPUT
+Build a shared Paho MQTT v2 client helper supporting password and certificate authentication, bounded reconnect backoff, and a timed wait for the initial CONNACK without losing the normal on_connect callback.
+
+OUTPUT
+The MQTT helper builds a Paho client with callback API version 2 and chooses persistent sessions for QoS levels above zero. Password authentication configures the username, password and optional server-authenticated TLS. Certificate authentication loads the CA, client certificate and private key. The client receives bounded reconnect delays and structured connection and disconnection callbacks.
+
+connect starts the network loop, waits for a successful CONNACK within a fixed timeout and raises MQTTClientError if the connection attempt fails or times out. Its temporary callback delegates to the existing lifecycle callback and is restored after the connection attempt. disconnect requests a clean disconnect and always stops the network loop.
+
+
+PROMPT INPUT
+Temporarily wrap on_connect to signal initial CONNACK, then restore the existing lifecycle callback after connection succeeds.
+
+OUTPUT
+original_on_connect = client.on_connect
+
+def on_connect_wrapper(client, userdata, flags, reason_code, properties):
+    original_on_connect(client, userdata, flags, reason_code, properties)
+    if reason_code == 0:
+        connected.set()
+
+client.on_connect = on_connect_wrapper
+
+try:
+    client.connect(config.host, config.port, config.keepalive)
+    client.loop_start()
+    if not connected.wait(timeout):
+        raise MQTTClientError("MQTT CONNACK was not received before timeout")
+finally:
+    client.on_connect = original_on_connect
+
+
+PROMPT INPUT
+Implement a stoppable telemetry publisher whose tick deadlines are calculated from one monotonic start time rather than repeated fixed sleeps.
+
+OUTPUT
+The publisher installs signal handlers for graceful shutdown and snapshot requests, loads the broker and workload configuration, creates the MQTT client and connects to the broker. For every sequence value it calculates the next absolute deadline from the original monotonic start time. Short sleeps keep shutdown responsive, while missed deadlines are logged instead of shifting all later ticks.
+
+At each tick it calls the pure simulator with the current UTC time, builds and serializes a versioned payload, and publishes it to the asset topic using the configured QoS. Publication outcomes distinguish accepted, deferred and rejected messages. On shutdown, the publisher logs its final sequence and timestamp and disconnects cleanly.
+
+
+PROMPT INPUT
+Calculate deadlines from the original monotonic start so earlier work cannot accumulate scheduling drift.
+
+OUTPUT
+def next_tick_delay(start: float, sequence: int, interval: float, now: float) -> float:
+    return start + (sequence * interval) - now
+
+
+PROMPT INPUT
+Create reusable InfluxDB Flux query helpers using escaped values and explicit timezone-aware time windows.
+
+OUTPUT
+The query module serializes Flux string values through JSON escaping and rejects timestamps that are not timezone aware. It builds range queries with explicit UTC start and stop timestamps and filters by measurement, asset ID and field.
+
+Reusable functions return stored sequences, first and last timestamps, point counts and series cardinality. Each function consumes the InfluxDB client result tables and converts records into the precise Python type needed by experiment and summary tooling.
+
+
+PROMPT INPUT
+Implement a pure boiler simulator using exponential heating and cooling, a repeating duty cycle, and a cold start per operating window.
+
+OUTPUT
+simulate validates that its timestamp is UTC and determines whether the time falls inside the configured daily operating window. Outside that window, it returns ambient supply and return temperatures, the configured setpoint and zero power draw.
+
+Inside the operating window, it calculates the current position in the repeating duty cycle. The boiler is on during the configured on-fraction and off for the remainder. Heating follows an exponential approach toward the supply setpoint, while cooling follows an exponential decay toward the ambient baseline. The function returns the asset readings without reading or changing external state.
+
+
+PROMPT INPUT
+Replay completed phases mathematically so the current cycle starts at the correct residual temperature without mutable history.
+
+OUTPUT
+for _ in range(completed_cycles):
+    end_of_heating = supply_setpoint + (
+        cycle_start_temp - supply_setpoint
+    ) * math.exp(-on_duration / tau_heat)
+
+    cycle_start_temp = ambient_baseline + (
+        end_of_heating - ambient_baseline
+    ) * math.exp(-off_duration / tau_cool)
+
+
+PROMPT INPUT
+Design an MQTT storage callback that validates telemetry, writes an InfluxDB point, detects sequence gaps, and logs one recovery transition.
+
+OUTPUT
+The storage writer connects to MQTT and subscribes to the asset topic after each successful connection. Incoming bytes are deserialized and validated against the telemetry payload schema. Valid payloads are converted into InfluxDB points using the payload timestamp, asset tag, five reading fields and sequence field.
+
+A SequenceTracker stores the last sequence for each asset and reports positive gaps while ignoring duplicates and publisher resets. A WriteFailureState counts consecutive database failures. Invalid messages and failed writes are logged without terminating the subscriber. The first successful write after failures emits one recovery event containing the recovered sequence and failure count, then resets the failure state.
+
+
+PROMPT INPUT
+Report recovery only on the first successful write after one or more consecutive failures.
+
+OUTPUT
+class WriteFailureState:
+    def __init__(self):
+        self.failures = 0
+
+    def record_failure(self) -> None:
+        self.failures += 1
+
+    def record_success(self) -> int:
+        failures = self.failures
+        self.failures = 0
+        return failures
+
+After a successful database write, handle_message calls record_success. It emits a write_recovered log only when the returned failure count is greater than zero. A second successful write returns zero and therefore produces no additional recovery log.
+
+
+PROMPT INPUT
+Test that a deployment trial cleans before and after measurement, including when polling for the first point raises TimeoutError.
+
+OUTPUT
+The tests mock Compose, cleanup, the monotonic clock and InfluxDB polling. The successful case verifies cleanup before startup, startup of the isolated project, calculation of the combined startup and query duration, and cleanup afterward. The failure case makes first-point polling raise TimeoutError and verifies that final cleanup still occurs. Additional cases confirm that the C1 profile is placed before the Compose subcommand and that managed-broker commands do not include the local-broker profile.
+
+
+PROMPT INPUT
+Write isolated pytest tests proving every outage mode is restored after interruption and the final sequence timestamp is included.
+
+OUTPUT
+The interruption test is parameterized over storage, broker and network modes. Docker operations, snapshots and sleeps are mocked. Sleep raises KeyboardInterrupt, and the test verifies that stopped services are restarted or the disconnected network is restored for every mode.
+
+The completed-trial test supplies fixed start and end snapshots and checks that the Flux stop timestamp is one millisecond after the final payload timestamp. It also verifies the recorded recovery action and sequence-loss calculation. Supporting tests cover delivery timeouts, database errors, confirmed recovery, Compose targeting, network commands and sequence reconciliation.
+
+
+PROMPT INPUT
+Write a pytest test that fires a successful Paho CONNACK callback and verifies connect() restores the client's original on_connect callback.
+
+OUTPUT
+def test_successful_connack_returns_and_restores_callback(self):
+    config = _password_config()
+    with patch.object(mqtt.Client, "tls_set"):
+        client = build_client(config, "id-12", "test.connack")
+
+    original_on_connect = client.on_connect
+
+    def fire_connack(*args, **kwargs):
+        reason_code = ReasonCode(PacketTypes.CONNACK, identifier=0)
+        client.on_connect(client, None, {}, reason_code, None)
+
+    with patch.object(mqtt.Client, "connect"), \
+        patch.object(mqtt.Client, "loop_start", side_effect=fire_connack), \
+        patch.object(mqtt.Client, "loop_stop"):
+        connect(client, config, timeout=1.0)
+
+    assert client.on_connect is original_on_connect
+
+
+PROMPT INPUT
+Write an InfluxDB integration test with two assets that verifies sequences, count, bounds, cardinality, and an empty future window.
+
+OUTPUT
+The integration test creates a temporary InfluxDB bucket and writes known telemetry points for two distinct assets at fixed UTC timestamps. It queries one asset and verifies its exact sequence values, point count, earliest and latest timestamp, and series cardinality. It separately queries a future time window and confirms that no sequences or points are returned. The temporary bucket is deleted during fixture cleanup.
+
+
+PROMPT INPUT
+Mock logs, InfluxDB queries, volume size, and network counters to verify that create_summary uses one exact publisher start/stop window.
+
+OUTPUT
+The test supplies publisher logs containing a matched start and stop pair, then mocks sequence, time-bound, point-count, database-volume and network measurements. It calls create_summary and verifies that every InfluxDB query receives the exact timestamps from that completed publisher run. The resulting summary is checked for its configuration, duration, expected messages, stored messages, loss, volume size, network bytes and operational event counts.
+
+
+PROMPT INPUT
+Write deterministic pytest cases for a boiler duty cycle, UTC input validation, Newton-style heating, gradual cooling, and residual cycle heat.
+
+OUTPUT
+The simulator tests use a fixed boiler configuration and timezone-aware timestamps. They verify ambient readings before and after operating hours, boiler-on and boiler-off phases, exact cycle boundaries, exponential movement toward the heating setpoint, gradual cooling, preservation of the return-temperature delta, setpoint and ambient fields, and rejection of naive or non-UTC timestamps. A later-cycle test confirms that completed phases carry residual heat into the next cycle without mutable simulator state.
+
+
+PROMPT INPUT
+Test that two failed writes followed by successful writes produce exactly one recovery log containing the first recovered sequence.
+
+OUTPUT
+def test_first_success_after_failures_logs_one_recovery(self):
+    write_api = MagicMock()
+    write_api.write.side_effect = [
+        Exception("connection refused"),
+        Exception("connection refused"),
+        None,
+        None,
+    ]
+    logger = MagicMock()
+    state = WriteFailureState()
+    tracker = SequenceTracker()
+
+    for sequence in range(4):
+        handle_message(
+            _raw(sequence=sequence),
+            write_api,
+            "telemetry",
+            tracker,
+            logger,
+            state,
+        )
+
+    logger.info.assert_called_once()
+    recovery = logger.info.call_args.kwargs["extra"]
+    assert recovery == {
+        "event": "write_recovered",
+        "sequence": 2,
+        "failures_since_last_success": 2,
+    }
