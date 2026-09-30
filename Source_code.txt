@@ -1,0 +1,4294 @@
+﻿===== .github\workflows\publish-container.yml =====
+# references
+# https://docs.github.com/en/actions/how-tos/create-and-publish-actions
+# https://docs.github.com/en/repositories/releasing-projects-on-github/managing-releases-in-a-repository
+# https://docs.github.com/en/packages/quickstart 
+
+name: Test and publish container
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+    tags:
+      - "v*.*.*"
+
+permissions:
+  contents: read
+  packages: write
+
+env:
+  IMAGE_NAME: ghcr.io/lochy2000/cloud-based-architecture-digital-twin
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+
+      - name: Set up Python
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: |
+            requirements.txt
+            requirements-runtime.txt
+
+      - name: Install test dependencies
+        run: python -m pip install -r requirements.txt
+
+      - name: Run tests
+        run: python -m pytest -q
+
+  container:
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@c7c53464625b32c7a7e944ae62b3e17d2b600130 # v3.7.0
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3.12.0
+
+      - name: Generate image metadata
+        id: meta
+        uses: docker/metadata-action@c299e40c65443455700f0fdfc63efafe5b349051 # v5.10.0
+        with:
+          images: ${{ env.IMAGE_NAME }}
+          flavor: latest=auto
+          tags: |
+            type=semver,pattern={{version}}
+            type=ref,event=branch
+            type=sha,prefix=sha-
+          labels: |
+            org.opencontainers.image.source=https://github.com/Lochy2000/Cloud-based-architecture-Digital-Twin
+            org.opencontainers.image.description=Python runtime for the cloud-based thermal-asset digital twin
+            org.opencontainers.image.licenses=NOASSERTION
+
+      - name: Build smoke-test image
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6.19.2
+        with:
+          context: .
+          file: deploy/Dockerfile
+          platforms: linux/amd64
+          load: true
+          push: false
+          tags: digital-twin:smoke
+          build-args: |
+            VCS_REF=${{ github.sha }}
+            VERSION=${{ steps.meta.outputs.version }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Smoke-test packaged Python modules
+        run: >-
+          docker run --rm --entrypoint python digital-twin:smoke -c
+          "import twin, twin.publisher, twin.storage_writer;
+          print('digital-twin runtime imports successfully')"
+
+      - name: Log in to GitHub Container Registry
+        if: github.event_name != 'pull_request'
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3.7.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and conditionally publish multi-platform image
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6.19.2
+        with:
+          context: .
+          file: deploy/Dockerfile
+          platforms: linux/amd64,linux/arm64
+          push: ${{ github.event_name != 'pull_request' }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          build-args: |
+            VCS_REF=${{ github.sha }}
+            VERSION=${{ steps.meta.outputs.version }}
+          sbom: true
+          provenance: mode=max
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+===== config\assets\boiler_01.yaml =====
+# parameters in this schema:
+# - Supply/return temperatures, operating envelope: Energy Systems Catapult (2024),
+#   Electrification of Heat Demonstration Project: Heat Pump Performance Data Analysis Report
+# - Heating time constants (valve, coil, sensor): US Patent 9612030 (Automated Time Constant
+#   Determination for Control Devices)
+# - Supply/return delta, condensing boiler guidance: Cleaver-Brooks Technical Documentation,
+#   "An Introduction to Condensing Boilers"
+# - duty cycle periods (HVAC on/off cycling): HVAC-Talk forum discussions on thermostat cycle
+#   time and heating system response, and combined evidence from building control systems
+# - Cooling time constant: standard heating engineering practice for thermal mass dissipation
+
+asset_id: boiler_01
+asset_type: thermal_system
+
+# temperatures in Â°C when boiler is on
+steady_state:
+  supply_temperature: 65.0
+  return_temperature: 55.0
+  ambient_baseline: 20.0
+
+# time constants in seconds for heating/cooling response
+dynamics:
+  heating_time_constant_seconds: 25
+  cooling_time_constant_seconds: 600
+
+# operating schedule and on/off pattern
+duty_cycle:
+  operating_hours_start: 6
+  operating_hours_end: 22
+  cycle_period_seconds: 1200
+  on_fraction: 0.5
+
+===== config\assets\hvac_01.yaml =====
+
+===== config\assets\hvac_02.yaml =====
+
+===== deploy\docker-compose.registry.yml =====
+services:
+  publisher:
+    image: ${TWIN_IMAGE:-ghcr.io/lochy2000/cloud-based-architecture-digital-twin:latest}
+    build: !reset null
+
+  storage-writer:
+    image: ${TWIN_IMAGE:-ghcr.io/lochy2000/cloud-based-architecture-digital-twin:latest}
+    build: !reset null
+
+===== deploy\docker-compose.yml =====
+# https://docs.docker.com/compose/gettingstarted/#step-2-define-and-start-your-services
+name: digital-twin
+
+services:
+  mosquitto:
+    image: eclipse-mosquitto:2.1.2-alpine
+    profiles: ["c1"]
+    ports:
+      - "8883:8883"
+    volumes:
+      - ./mosquitto/mosquitto.conf:/mosquitto/config/mosquitto.conf:ro
+      - ./mosquitto/certs:/mosquitto/certs:ro
+      - ./mosquitto/passwd:/mosquitto/passwd:ro
+      - mosquitto-data:/mosquitto/data
+    healthcheck:
+      test:
+        - CMD
+        - mosquitto_pub
+        - -h
+        - localhost
+        - -p
+        - "8883"
+        - --cafile
+        - /mosquitto/certs/ca.crt
+        - -u
+        - twin
+        - -P
+        - ${BROKER_PASSWORD}
+        - -q
+        - "1"
+        - -t
+        - twin/healthcheck
+        - -m
+        - ready
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 5s
+    restart: unless-stopped
+
+  influxdb:
+    image: influxdb:2.7
+    ports:
+      - "8086:8086"
+    environment:
+      DOCKER_INFLUXDB_INIT_MODE: setup
+      DOCKER_INFLUXDB_INIT_USERNAME: ${INFLUX_INIT_USERNAME}
+      DOCKER_INFLUXDB_INIT_PASSWORD: ${INFLUX_INIT_PASSWORD}
+      DOCKER_INFLUXDB_INIT_ORG: ${INFLUX_ORG}
+      DOCKER_INFLUXDB_INIT_BUCKET: ${INFLUX_BUCKET}
+      DOCKER_INFLUXDB_INIT_ADMIN_TOKEN: ${INFLUX_TOKEN}
+      DOCKER_INFLUXDB_INIT_RETENTION: 90d
+    volumes:
+      - influxdb-data:/var/lib/influxdb2
+    healthcheck:
+      test: ["CMD", "influx", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+    restart: unless-stopped
+
+  grafana:
+    image: grafana/grafana:11.6.6
+    ports:
+      - "3000:3000"
+    environment:
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD}
+      GF_USERS_ALLOW_SIGN_UP: "false"
+      INFLUX_TOKEN: ${INFLUX_TOKEN}
+      INFLUX_ORG: ${INFLUX_ORG}
+      INFLUX_BUCKET: ${INFLUX_BUCKET}
+    volumes:
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./grafana/dashboards:/var/lib/grafana/dashboards:ro
+      - grafana-data:/var/lib/grafana
+    depends_on:
+      influxdb:
+        condition: service_healthy
+    restart: unless-stopped
+
+  publisher:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+    command: ["python", "-m", "twin.publisher"]
+    env_file:
+      - ${ENV_FILE:-../config/env/c1.env}
+    environment:
+      MQTT_CLIENT_ID: twin-publisher-boiler_01
+      ASSET_CONFIG_PATH: /app/config/assets/boiler_01.yaml
+    volumes:
+      - ../config/assets:/app/config/assets:ro
+      - ./mosquitto/certs:/certs:ro
+    depends_on:
+      mosquitto:
+        condition: service_healthy
+        required: false
+    restart: unless-stopped
+
+  storage-writer:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+    command: ["python", "-m", "twin.storage_writer"]
+    env_file:
+      - ${ENV_FILE:-../config/env/c1.env}
+    environment:
+      MQTT_CLIENT_ID: twin-storage-boiler_01
+      ASSET_ID: boiler_01
+    volumes:
+      - ./mosquitto/certs:/certs:ro
+    depends_on:
+      mosquitto:
+        condition: service_healthy
+        required: false
+      influxdb:
+        condition: service_healthy
+    restart: unless-stopped
+
+volumes:
+  mosquitto-data:
+  influxdb-data:
+  grafana-data:
+
+===== deploy\Dockerfile =====
+FROM python:3.11-slim
+
+ARG VCS_REF=unknown
+ARG VERSION=0.0.0-dev
+
+LABEL org.opencontainers.image.source="https://github.com/Lochy2000/Cloud-based-architecture-Digital-Twin" \
+      org.opencontainers.image.description="Python runtime for the cloud-based thermal-asset digital twin" \
+      org.opencontainers.image.revision="${VCS_REF}" \
+      org.opencontainers.image.version="${VERSION}" \
+      org.opencontainers.image.licenses="NOASSERTION"
+
+ENV PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONPATH=/app/src
+
+WORKDIR /app
+
+COPY requirements-runtime.txt .
+RUN python -m pip install --no-cache-dir -r requirements-runtime.txt
+
+RUN groupadd --gid 10001 twin \
+    && useradd --uid 10001 --gid twin --create-home --shell /usr/sbin/nologin twin
+
+COPY --chown=twin:twin src/ /app/src/
+
+USER 10001:10001
+
+CMD ["python", "-m", "twin.publisher"]
+
+===== deploy\grafana\provisioning\dashboards\dashboards.yml =====
+# https://grafana.com/docs/grafana/latest/administration/provisioning/#dashboards
+apiVersion: 1
+
+providers:
+  - name: digital-twin
+    orgId: 1
+    folder: ""
+    type: file
+    disableDeletion: true
+    updateIntervalSeconds: 30
+    allowUiUpdates: false
+    options:
+      path: /var/lib/grafana/dashboards
+      foldersFromFilesStructure: false
+
+===== deploy\grafana\provisioning\datasources\influxdb.yml =====
+# https://grafana.com/docs/grafana/latest/datasources/
+# https://docs.influxdata.com/influxdb/v2/get-started/setup/?t=Set+up+with+the+CLI#run-initial-setup-process
+
+apiVersion: 1
+
+datasources:
+  - name: InfluxDB
+    type: influxdb
+    access: proxy
+    url: http://influxdb:8086
+    isDefault: true
+    jsonData:
+      version: Flux
+      organization: ${INFLUX_ORG}
+      defaultBucket: ${INFLUX_BUCKET}
+      tlsSkipVerify: true
+    secureJsonData:
+      token: ${INFLUX_TOKEN}
+
+===== deploy\mosquitto\mosquitto.conf =====
+# Keep TLS on for C1 so it is comparable with the managed brokers.
+# https://mosquitto.org/man/mosquitto-conf-5.html
+
+listener 8883
+protocol mqtt
+
+cafile /mosquitto/certs/ca.crt
+certfile /mosquitto/certs/server.crt
+keyfile /mosquitto/certs/server.key
+
+allow_anonymous false
+password_file /mosquitto/passwd
+
+persistence true
+persistence_location /mosquitto/data/
+
+log_dest stdout
+log_type error
+log_type warning
+log_type notice
+log_type information
+log_timestamp true
+log_timestamp_format %Y-%m-%dT%H:%M:%S
+
+===== experiments\deployment_timer.py =====
+"""Measure clean deployment time from Compose startup to first stored point.
+
+This uses the Docker Compose CLI and Python monotonic-clock documentation.
+AI prompt used: "Design a repeatable Docker Compose deployment timer that starts from
+  clean volumes, polls for the first stored point, and always cleans up."
+"""
+
+import argparse
+import json
+import os
+import statistics
+import subprocess
+import sys
+import time
+from datetime import datetime, timedelta, timezone
+from pathlib import Path
+
+from dotenv import dotenv_values
+from influxdb_client import InfluxDBClient
+
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+DEPLOY_DIR = PROJECT_ROOT / "deploy"
+sys.path.insert(0, str(PROJECT_ROOT / "src"))
+
+from twin.query import fetch_point_count
+
+DEFAULT_TRIALS = 3
+DEFAULT_TIMEOUT_SECONDS = 180.0
+DEFAULT_POLL_SECONDS = 0.25
+
+
+def run(command: list[str]) -> subprocess.CompletedProcess:
+    return subprocess.run(
+        command,
+        cwd=DEPLOY_DIR,
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+
+
+def compose_command(configuration: str, env_file: Path,
+                    project_name: str, *args: str) -> list[str]:
+    command = [
+        "docker", "compose",
+        "--project-name", project_name,
+        "--env-file", str(env_file),
+    ]
+    if configuration == "c1":
+        command.extend(["--profile", "c1"])
+    return [*command, *args]
+
+
+def compose(configuration: str, env_file: Path,
+            project_name: str, *args: str) -> subprocess.CompletedProcess:
+    return run(compose_command(configuration, env_file, project_name, *args))
+
+
+def required_setting(values: dict, name: str) -> str:
+    value = os.environ.get(name) or values.get(name)
+    if not value:
+        raise RuntimeError(f"environment file is missing {name}")
+    return str(value)
+
+
+def influx_settings(env_file: Path) -> dict[str, str]:
+    values = dotenv_values(env_file)
+    return {
+        "url": os.environ.get("INFLUX_QUERY_URL", "http://localhost:8086"),
+        "token": required_setting(values, "INFLUX_TOKEN"),
+        "org": required_setting(values, "INFLUX_ORG"),
+        "bucket": required_setting(values, "INFLUX_BUCKET"),
+        "asset_id": str(os.environ.get("ASSET_ID") or values.get("ASSET_ID", "boiler_01")),
+    }
+
+
+def first_point_exists(settings: dict[str, str], started_at: datetime) -> bool:
+    """Return whether this deployment has stored at least one telemetry point."""
+    stop = datetime.now(timezone.utc) + timedelta(seconds=1)
+    with InfluxDBClient(
+        url=settings["url"], token=settings["token"], org=settings["org"]
+    ) as client:
+        return fetch_point_count(
+            client.query_api(),
+            settings["bucket"],
+            settings["asset_id"],
+            started_at,
+            stop,
+        ) > 0
+
+
+def wait_for_first_point(settings: dict[str, str], started_at: datetime,
+                         timeout: float, poll_interval: float) -> float:
+    """Poll until the first point is queryable and return monotonic elapsed time."""
+    began = time.monotonic()
+    deadline = began + timeout
+    while time.monotonic() < deadline:
+        try:
+            if first_point_exists(settings, started_at):
+                return time.monotonic() - began
+        except Exception:
+            # Connection and query failures are expected while InfluxDB starts.
+            pass
+        time.sleep(poll_interval)
+    raise TimeoutError(f"no telemetry point appeared within {timeout}s")
+
+
+def clean_stack(configuration: str, env_file: Path, project_name: str) -> None:
+    compose(
+        configuration,
+        env_file,
+        project_name,
+        "down",
+        "--volumes",
+        "--remove-orphans",
+    )
+
+
+def prepare_images(configuration: str, env_file: Path, project_name: str) -> None:
+    """Resolve supporting images and build the runtime outside measured time."""
+    compose(
+        configuration, env_file, project_name,
+        "pull", "--ignore-buildable",
+    )
+    compose(
+        configuration, env_file, project_name,
+        "build", "publisher", "storage-writer",
+    )
+
+
+def measure_trial(configuration: str, env_file: Path, project_name: str,
+                  settings: dict[str, str], timeout: float,
+                  poll_interval: float) -> dict:
+    """Measure one clean deployment and always remove its isolated volumes."""
+    clean_stack(configuration, env_file, project_name)
+    started_at = datetime.now(timezone.utc)
+    began = time.monotonic()
+    # AI prompt used: "Use try/finally so isolated
+    # trial resources are removed after
+    # both successful measurements and polling failures."
+    try:
+        compose(configuration, env_file, project_name, "up", "--detach", "--no-build")
+        startup_elapsed = time.monotonic() - began
+        query_elapsed = wait_for_first_point(
+            settings, started_at, timeout - startup_elapsed, poll_interval
+        )
+        elapsed = startup_elapsed + query_elapsed
+        return {
+            "started_at": started_at.isoformat(),
+            "seconds_to_first_datapoint": round(elapsed, 3),
+        }
+    finally:
+        clean_stack(configuration, env_file, project_name)
+
+
+def default_output(configuration: str) -> Path:
+    timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    return (
+        PROJECT_ROOT / "experiments" / "deployment_timings"
+        / f"{configuration}_{timestamp}.json"
+    )
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(
+        description="Measure clean Compose deployment time to the first stored point."
+    )
+    parser.add_argument("--configuration", required=True, choices=["c1", "c2a", "c2b"])
+    parser.add_argument("--env-file", type=Path)
+    parser.add_argument("--trials", type=int, default=DEFAULT_TRIALS)
+    parser.add_argument("--timeout", type=float, default=DEFAULT_TIMEOUT_SECONDS)
+    parser.add_argument("--poll-interval", type=float, default=DEFAULT_POLL_SECONDS)
+    parser.add_argument("--output", type=Path)
+    args = parser.parse_args()
+
+    if args.trials < 1:
+        parser.error("--trials must be at least 1")
+    if args.timeout <= 0 or args.poll_interval <= 0:
+        parser.error("--timeout and --poll-interval must be positive")
+
+    env_file = (args.env_file or (
+        PROJECT_ROOT / "config" / "env" / f"{args.configuration}.env"
+    )).resolve()
+    project_name = f"digital-twin-timing-{args.configuration}"
+    settings = influx_settings(env_file)
+
+    prepare_images(args.configuration, env_file, project_name)
+    trials = []
+    for number in range(1, args.trials + 1):
+        print(f"[{args.configuration}] deployment trial {number}/{args.trials}", flush=True)
+        result = measure_trial(
+            args.configuration,
+            env_file,
+            project_name,
+            settings,
+            args.timeout,
+            args.poll_interval,
+        )
+        result["trial"] = number
+        trials.append(result)
+        print(f"  first datapoint={result['seconds_to_first_datapoint']}s", flush=True)
+
+    durations = [trial["seconds_to_first_datapoint"] for trial in trials]
+    summary = {
+        "configuration": args.configuration,
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "trials": trials,
+        "median_seconds_to_first_datapoint": round(statistics.median(durations), 3),
+        "poll_interval_seconds": args.poll_interval,
+    }
+    output = args.output or default_output(args.configuration)
+    output.parent.mkdir(parents=True, exist_ok=True)
+    output.write_text(json.dumps(summary, indent=2) + "\n", encoding="utf-8")
+    print(f"\nMedian: {summary['median_seconds_to_first_datapoint']}s")
+    print(f"Written to {output}")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
+
+===== experiments\fault_injection.py =====
+"""Fault injection trials.
+
+runs three failure modes, three trials each, and records timings to
+recovery_trials.csv. The pipeline must already be running and flowing data
+before this is started.
+
+Failure modes:
+  broker      broker unreachable for the outage duration
+  network     publisher-to-broker connectivity severed, broker still running
+  storage     InfluxDB stopped, messages still arriving
+
+for the self-hosted configuration the broker is stopped directly. For the
+managed brokers there is no container to stop, so Docker disconnects the
+publisher container from its network instead. The same mechanism is used for
+the network mode across all three configurations, which keeps the comparison
+consistent.
+
+The trial design is informed by https://principlesofchaos.org/ and the Docker
+network and InfluxDB client documentation. AI was used to help make outages
+reversible and measure recovery and message loss. Prompt used: "Build repeatable broker, network, and storage fault trials that
+  always restore the target and measure recovery and message loss."
+"""
+
+import argparse
+import csv
+import json
+import subprocess
+import time
+from datetime import datetime, timedelta, timezone
+from pathlib import Path
+import os
+import sys
+
+from dotenv import dotenv_values
+from influxdb_client import InfluxDBClient
+
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(PROJECT_ROOT / "src"))
+
+from twin.query import fetch_sequences
+
+ENV_FILE = os.environ.get("COMPOSE_ENV_FILE", "../config/env/c1.env")
+COMPOSE_PROJECT = None
+CONFIGURATION = None
+OUTPUT_PATH = Path(os.environ.get("TRIAL_OUTPUT_PATH", "recovery_trials.csv"))
+FIELDNAMES = [
+    "configuration", "compose_project", "mode", "trial", "started_at",
+    "outage_seconds", "detection_seconds", "recovery_seconds",
+    "messages_expected", "messages_stored", "messages_lost",
+    "restored_at", "recovery_actions", "delivery_timeout_seconds", "notes",
+]
+
+PUBLISHER_SERVICE = "publisher"
+STORAGE_SERVICE = "storage-writer"
+INFLUX_SERVICE = "influxdb"
+BROKER_SERVICE = "mosquitto"
+DEFAULT_OUTAGE_SECONDS = 150.0
+
+def run(command: list[str], check: bool = True) -> subprocess.CompletedProcess:
+    return subprocess.run(command, capture_output=True, text=True, check=check)
+
+def compose(*args: str, check: bool = True) -> subprocess.CompletedProcess:
+    if not COMPOSE_PROJECT or not CONFIGURATION:
+        raise RuntimeError("select --configuration and --project-name before running trials")
+    command = ["docker", "compose", "--project-name", COMPOSE_PROJECT,
+               "--file", str(PROJECT_ROOT / "deploy/docker-compose.yml"),
+               "--env-file", ENV_FILE]
+    if CONFIGURATION == "c1":
+        command.extend(["--profile", "c1"])
+    return run([*command, *args], check=check)
+
+def container_id(service: str) -> str:
+    result = compose("ps", "-q", service)
+    cid = result.stdout.strip()
+    if not cid:
+        raise RuntimeError(f"service {service!r} is not running")
+    return cid
+
+def logs_since(service: str, since: str) -> list[dict]:
+    """Structured log lines emitted by a service since a timestamp."""
+    result = compose("logs", "--since", since, "--no-log-prefix", service, check=False)
+    entries = []
+    for line in result.stdout.splitlines():
+        line = line.strip()
+        if not line.startswith("{"):
+            continue
+        try:
+            entries.append(json.loads(line))
+        except json.JSONDecodeError:
+            continue
+    return entries
+
+def first_event_time(entries: list[dict], events: set[str]) -> datetime | None:
+    for entry in entries:
+        if entry.get("event") in events:
+            return datetime.fromisoformat(entry["timestamp"])
+    return None
+
+def reconcile_sequences(start_sequence: int, end_sequence: int,
+                        stored_sequences: set[int]) -> dict[str, int]:
+    """Reconcile sequences attempted after start through the inclusive end."""
+    if end_sequence < start_sequence:
+        raise ValueError("publisher sequence restarted during the trial")
+    expected = set(range(start_sequence + 1, end_sequence + 1))
+    stored = expected & stored_sequences
+    return {
+        "messages_expected": len(expected),
+        "messages_stored": len(stored),
+        "messages_lost": len(expected - stored),
+    }
+
+# Failure controls.
+
+def container_network(container: str) -> str:
+    """Return the single Docker network attached to a trial container."""
+    result = run([
+        "docker", "inspect", "--format", "{{json .NetworkSettings.Networks}}", container
+    ])
+    networks = list(json.loads(result.stdout))
+    if len(networks) != 1:
+        raise RuntimeError(
+            f"expected container {container!r} to have one network, found {networks}"
+        )
+    return networks[0]
+
+def sever_network(service: str) -> tuple[str, str]:
+    """Disconnect a service container from its Compose network."""
+    container = container_id(service)
+    network = container_network(container)
+    run(["docker", "network", "disconnect", network, container])
+    return network, container
+
+def restore_network(network: str, container: str) -> None:
+    """Reconnect a service container to its original Compose network."""
+    run(["docker", "network", "connect", network, container])
+
+def stop_service(service: str) -> None:
+    compose("stop", service)
+
+def start_service(service: str) -> None:
+    compose("start", service)
+
+def publisher_snapshot(timeout: float = 45.0) -> dict:
+    """Request and return a fresh publisher snapshot event."""
+    requested_at = datetime.now(timezone.utc).isoformat()
+    run(["docker", "kill", "--signal=USR1", container_id(PUBLISHER_SERVICE)])
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        entries = logs_since(PUBLISHER_SERVICE, requested_at)
+        for entry in entries:
+            if entry.get("event") == "publisher_snapshot":
+                return entry
+        time.sleep(0.25)
+    raise RuntimeError(f"publisher did not emit a snapshot within {timeout}s")
+
+def stored_sequences(start: datetime, stop: datetime) -> set[int]:
+    """Query sequences stored during a trial using its environment file."""
+    values = dotenv_values(ENV_FILE)
+    url = os.environ.get("INFLUX_QUERY_URL", "http://localhost:8086")
+    token = values.get("INFLUX_TOKEN")
+    org = values.get("INFLUX_ORG")
+    bucket = values.get("INFLUX_BUCKET")
+    asset_id = values.get("ASSET_ID", "boiler_01")
+    if not all((token, org, bucket, asset_id)):
+        raise RuntimeError("trial environment is missing InfluxDB or asset settings")
+    with InfluxDBClient(url=url, token=token, org=org) as client:
+        return fetch_sequences(
+            client.query_api(), bucket, asset_id, start=start, stop=stop
+        )
+
+
+# Trial runner.
+
+def wait_for_delivery(start: datetime, stop: datetime, expected: set[int],
+                      timeout: float) -> set[int]:
+    """Wait for a fixed range; an unreadable database is not evidence of loss."""
+    deadline = time.monotonic() + timeout
+    while True:
+        stored = stored_sequences(start, stop)
+        if expected <= stored or time.monotonic() >= deadline:
+            return stored
+        time.sleep(min(0.5, max(0.0, deadline - time.monotonic())))
+
+
+def confirmed_recovery(restored_at: datetime, timeout: float) -> float | None:
+    """Observe delivery of telemetry generated after restoration."""
+    began = time.monotonic()
+    deadline = began + timeout
+    while time.monotonic() < deadline:
+        try:
+            if stored_sequences(restored_at, datetime.now(timezone.utc) + timedelta(milliseconds=1)):
+                return time.monotonic() - began
+        except Exception:
+            # InfluxDB may still be starting; timeout records unavailable recovery.
+            pass
+        time.sleep(min(0.5, max(0.0, deadline - time.monotonic())))
+    return None
+
+
+def run_trial(configuration: str, mode: str, trial: int, outage: float,
+              settle: float, delivery_timeout: float = 90.0) -> dict:
+    if mode not in {"broker", "network", "storage"}:
+        raise ValueError(f"unknown mode {mode!r}")
+    start_snapshot = publisher_snapshot()
+    window_start = datetime.fromisoformat(start_snapshot["timestamp"])
+    started_at = datetime.now(timezone.utc)
+    since = started_at.isoformat()
+    stopped_service = None
+    connection = None
+    actions = []
+
+    # Resolve recovery targets before mutating Docker state.
+    if mode == "storage":
+        stopped_service = INFLUX_SERVICE
+        container_id(stopped_service)
+    elif mode == "broker" and configuration == "c1":
+        stopped_service = BROKER_SERVICE
+        container_id(stopped_service)
+    else:
+        container = container_id(PUBLISHER_SERVICE)
+        connection = (container_network(container), container)
+
+    # AI prompt used: "Guarantee restoration
+    # with try/finally even when an outage is
+    # interrupted, while recording the recovery action actually performed."
+    try:
+        if stopped_service:
+            stop_service(stopped_service)
+        else:
+            run(["docker", "network", "disconnect", *connection])
+        time.sleep(outage)
+    finally:
+        # Also runs on Ctrl+C, sleep errors, or a partially failed injection.
+        if stopped_service:
+            start_service(stopped_service)
+            actions.append(f"compose start {stopped_service}")
+        else:
+            network, container = connection
+            attached = json.loads(run([
+                "docker", "inspect", "--format",
+                "{{json .NetworkSettings.Networks}}", container
+            ]).stdout)
+            if network not in attached:
+                restore_network(network, container)
+                actions.append(f"docker network connect {network} {container}")
+
+    restored_at = datetime.now(timezone.utc)
+    recovery_seconds = confirmed_recovery(restored_at, settle)
+    end_snapshot = publisher_snapshot()
+    # AI helped with this time boundary. Prompt used: "Make an exclusive Flux
+    # stop bound include the final
+    # millisecond-precision payload timestamp, then reconcile expected sequences."
+    # Log and payload timestamps have millisecond precision; Flux stop is exclusive.
+    window_stop = datetime.fromisoformat(end_snapshot["timestamp"]) + timedelta(milliseconds=1)
+    first = int(start_snapshot["sequence"])
+    last = int(end_snapshot["sequence"])
+    reconcile_sequences(first, last, set())  # reject a publisher sequence reset
+    expected = set(range(first + 1, last + 1))
+    stored = wait_for_delivery(window_start, window_stop, expected, delivery_timeout)
+    loss = reconcile_sequences(first, last, stored)
+
+    watched = STORAGE_SERVICE if mode == "storage" else PUBLISHER_SERVICE
+    entries = [entry for entry in logs_since(watched, since)
+               if not entry.get("expected", False)]
+    detected = first_event_time(
+        entries, {"disconnected", "write_failed", "publish_failed", "publish_deferred"}
+    )
+    detection_seconds = (detected - started_at).total_seconds() if detected else None
+    notes = []
+    if detected is None:
+        notes.append("no detection event found in logs")
+    if recovery_seconds is None:
+        notes.append("no post-restoration database delivery before recovery timeout")
+    if loss["messages_lost"]:
+        notes.append("messages missing at delivery timeout; later delivery remains possible")
+    return {
+        "configuration": configuration, "compose_project": COMPOSE_PROJECT,
+        "mode": mode, "trial": trial,
+        "started_at": since, "restored_at": restored_at.isoformat(),
+        "outage_seconds": outage,
+        "detection_seconds": round(detection_seconds, 3) if detected else "",
+        "recovery_seconds": round(recovery_seconds, 3) if recovery_seconds is not None else "",
+        "recovery_actions": json.dumps(actions),
+        "delivery_timeout_seconds": delivery_timeout,
+        **loss, "notes": "; ".join(notes),
+    }
+
+def append_row(row: dict) -> None:
+    exists = OUTPUT_PATH.exists()
+    if exists:
+        with OUTPUT_PATH.open(newline="", encoding="utf-8") as handle:
+            if next(csv.reader(handle), None) != FIELDNAMES:
+                raise ValueError("CSV header differs; select a new --output file")
+    OUTPUT_PATH.parent.mkdir(parents=True, exist_ok=True)
+    with OUTPUT_PATH.open("a", newline="", encoding="utf-8") as handle:
+        writer = csv.DictWriter(handle, fieldnames=FIELDNAMES)
+        if not exists:
+            writer.writeheader()
+        writer.writerow(row)
+
+def main() -> int:
+    global ENV_FILE, COMPOSE_PROJECT, CONFIGURATION, OUTPUT_PATH
+    parser = argparse.ArgumentParser(description="Run fault injection trials.")
+    parser.add_argument("--configuration", required=True, choices=["c1", "c2a", "c2b"])
+    parser.add_argument("--project-name", required=True, help="existing Compose project name")
+    parser.add_argument("--env-file", type=Path)
+    parser.add_argument("--output", type=Path)
+    parser.add_argument("--delivery-timeout", type=float, default=90.0)
+    parser.add_argument("--mode", choices=["broker", "network", "storage", "all"], default="all")
+    parser.add_argument("--trials", type=int, default=3)
+    parser.add_argument("--outage", type=float, default=DEFAULT_OUTAGE_SECONDS,
+                        help="seconds the failure is held")
+    parser.add_argument("--settle", type=float, default=90.0,
+                        help="timeout for confirmed post-restoration database delivery")
+    parser.add_argument("--gap", type=float, default=120.0,
+                        help="seconds between trials, so one does not affect the next")
+    args = parser.parse_args()
+    if args.trials < 1 or min(args.outage, args.settle, args.delivery_timeout) <= 0 or args.gap < 0:
+        parser.error("trials and timeouts must be positive; gap must be non-negative")
+    CONFIGURATION = args.configuration
+    COMPOSE_PROJECT = args.project_name
+    ENV_FILE = str((args.env_file or PROJECT_ROOT / "config/env" / f"{CONFIGURATION}.env").resolve())
+    if not Path(ENV_FILE).is_file():
+        parser.error(f"environment file does not exist: {ENV_FILE}")
+    # Compose interpolation and service env_file must select the same configuration.
+    os.environ["ENV_FILE"] = ENV_FILE
+    if args.output:
+        OUTPUT_PATH = args.output
+    if OUTPUT_PATH.exists():
+        with OUTPUT_PATH.open(newline="", encoding="utf-8") as handle:
+            if next(csv.reader(handle), None) != FIELDNAMES:
+                parser.error("CSV header differs; select a new --output file")
+    container_id(PUBLISHER_SERVICE)
+    container_id(STORAGE_SERVICE)
+
+    modes = ["broker", "network", "storage"] if args.mode == "all" else [args.mode]
+
+    for mode in modes:
+        for trial in range(1, args.trials + 1):
+            print(f"[{args.configuration}] {mode} trial {trial}/{args.trials}", flush=True)
+            row = run_trial(args.configuration, mode, trial, args.outage, args.settle,
+                            args.delivery_timeout)
+            append_row(row)
+            print(f"  detection={row['detection_seconds']}s "
+                f"recovery={row['recovery_seconds']}s "
+                f"lost={row['messages_lost']}", flush=True)
+
+            if not (mode == modes[-1] and trial == args.trials):
+                time.sleep(args.gap)
+
+    print(f"\nWritten to {OUTPUT_PATH}")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
+
+===== experiments\run_summary.py =====
+"""Create an auditable JSON summary for one completed experiment run.
+
+This follows the InfluxDB client and Docker Compose logs documentation.
+AI prompt used: "Create an experiment summary from one matched publisher start/stop
+  window and reject stale or incomplete network checkpoints."
+"""
+
+import argparse
+import json
+import os
+import subprocess
+import sys
+from datetime import datetime, timezone
+from pathlib import Path
+
+from dotenv import dotenv_values
+from influxdb_client import InfluxDBClient
+
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(PROJECT_ROOT / "src"))
+
+from twin.query import (
+    fetch_point_count,
+    fetch_series_cardinality,
+    fetch_time_bounds,
+)
+
+
+def run(command: list[str]) -> subprocess.CompletedProcess:
+    return subprocess.run(command, capture_output=True, text=True, check=True)
+
+
+def compose(env_file: str, *args: str) -> subprocess.CompletedProcess:
+    return run(["docker", "compose", "--env-file", env_file, *args])
+
+
+def structured_logs(env_file: str, service: str) -> list[dict]:
+    """Read JSON application events from the current Compose container."""
+    result = compose(env_file, "logs", "--no-log-prefix", service)
+    entries = []
+    for line in result.stdout.splitlines():
+        line = line.strip()
+        if not line.startswith("{"):
+            continue
+        try:
+            entries.append(json.loads(line))
+        except json.JSONDecodeError:
+            continue
+    return entries
+
+
+def latest_completed_run(entries: list[dict]) -> tuple[dict, dict]:
+    """Return the latest matched publisher started/stopping event pair."""
+    # AI prompt used: "Select the latest
+    # completed start/stop pair while ignoring a
+    # newer run that has started but not stopped."
+    started = None
+    completed = None
+    for entry in entries:
+        if entry.get("event") == "started":
+            started = entry
+        elif entry.get("event") == "stopping" and started is not None:
+            completed = (started, entry)
+            started = None
+    if completed is None:
+        raise RuntimeError("publisher logs contain no completed run")
+    return completed
+
+
+def current_run(entries: list[dict]) -> dict:
+    """Return the active publisher run's started event."""
+    started = None
+    for entry in entries:
+        if entry.get("event") == "started":
+            started = entry
+        elif entry.get("event") == "stopping":
+            started = None
+    if started is None:
+        raise RuntimeError("publisher is not running")
+    return started
+
+
+def publisher_network_tx_bytes(env_file: str) -> tuple[str, int]:
+    """Read the publisher container's exact transmitted-byte counter."""
+    container = compose(env_file, "ps", "-q", "publisher").stdout.strip()
+    if not container:
+        raise RuntimeError("publisher container is not running")
+    result = run([
+        "docker", "exec", container,
+        "cat", "/sys/class/net/eth0/statistics/tx_bytes",
+    ])
+    return container, int(result.stdout.strip())
+
+
+def capture_network_counter(configuration: str, env_file: str,
+                            capture_file: Path, stage: str) -> dict:
+    """Record a start or end network counter for the active publisher run."""
+    started = current_run(structured_logs(env_file, "publisher"))
+    run_started_at = datetime.fromisoformat(started["timestamp"]).isoformat()
+    container, tx_bytes = publisher_network_tx_bytes(env_file)
+    captured_at = datetime.now(timezone.utc).isoformat()
+
+    # AI prompt used: "Store start/end
+    # counters only when configuration, container, and
+    # publisher start time identify the same run."
+    if stage == "start":
+        capture = {
+            "configuration": configuration,
+            "container_id": container,
+            "publisher_started_at": run_started_at,
+            "start_captured_at": captured_at,
+            "tx_start_bytes": tx_bytes,
+        }
+    else:
+        if not capture_file.exists():
+            raise RuntimeError("network start checkpoint has not been captured")
+        capture = json.loads(capture_file.read_text(encoding="utf-8"))
+        if (
+            capture.get("configuration") != configuration
+            or capture.get("container_id") != container
+            or capture.get("publisher_started_at") != run_started_at
+        ):
+            raise RuntimeError("network checkpoint belongs to a different publisher run")
+        if tx_bytes < int(capture["tx_start_bytes"]):
+            raise RuntimeError("publisher network counter decreased during the run")
+        capture["end_captured_at"] = captured_at
+        capture["tx_end_bytes"] = tx_bytes
+
+    capture_file.parent.mkdir(parents=True, exist_ok=True)
+    capture_file.write_text(json.dumps(capture, indent=2) + "\n", encoding="utf-8")
+    return capture
+
+
+def network_measurements(capture: dict, publisher_started_at: datetime) -> dict:
+    """Validate a completed checkpoint and return its summary fields."""
+    if "tx_end_bytes" not in capture:
+        raise RuntimeError("network end checkpoint has not been captured")
+    if capture.get("publisher_started_at") != publisher_started_at.isoformat():
+        raise RuntimeError("network checkpoint belongs to a different completed run")
+    start = int(capture["tx_start_bytes"])
+    end = int(capture["tx_end_bytes"])
+    if end < start:
+        raise RuntimeError("publisher network counter decreased during the run")
+    return {
+        "publisher_network_tx_start_bytes": start,
+        "publisher_network_tx_end_bytes": end,
+        "publisher_network_tx_bytes": end - start,
+        "network_capture_started_at": capture["start_captured_at"],
+        "network_capture_ended_at": capture["end_captured_at"],
+    }
+
+
+def database_volume_bytes(env_file: str) -> int:
+    """Measure the allocated InfluxDB data directory in KiB, returned as bytes."""
+    result = compose(env_file, "exec", "-T", "influxdb", "du", "-sk", "/var/lib/influxdb2")
+    kibibytes = int(result.stdout.split()[0])
+    return kibibytes * 1024
+
+
+def required_setting(values: dict, name: str) -> str:
+    value = os.environ.get(name) or values.get(name)
+    if not value:
+        raise RuntimeError(f"environment file is missing {name}")
+    return str(value)
+
+
+def create_summary(configuration: str, env_file: str, network_capture: dict) -> dict:
+    started, stopped = latest_completed_run(structured_logs(env_file, "publisher"))
+    started_at = datetime.fromisoformat(started["timestamp"])
+    stopped_at = datetime.fromisoformat(stopped["timestamp"])
+    if started_at.tzinfo is None or stopped_at.tzinfo is None:
+        raise RuntimeError("publisher log timestamps must be timezone-aware")
+
+    values = dotenv_values(env_file)
+    url = os.environ.get("INFLUX_QUERY_URL", "http://localhost:8086")
+    token = required_setting(values, "INFLUX_TOKEN")
+    org = required_setting(values, "INFLUX_ORG")
+    bucket = required_setting(values, "INFLUX_BUCKET")
+    asset_id = str(os.environ.get("ASSET_ID") or values.get("ASSET_ID", "boiler_01"))
+
+    with InfluxDBClient(url=url, token=token, org=org) as client:
+        query_api = client.query_api()
+        message_count = fetch_point_count(
+            query_api, bucket, asset_id, started_at, stopped_at
+        )
+        first_stored, last_stored = fetch_time_bounds(
+            query_api, bucket, asset_id, started_at, stopped_at
+        )
+        cardinality = fetch_series_cardinality(
+            query_api, bucket, started_at, stopped_at
+        )
+
+    return {
+        "configuration": configuration,
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "asset_id": asset_id,
+        "publisher_started_at": started_at.isoformat(),
+        "publisher_stopped_at": stopped_at.isoformat(),
+        "run_duration_seconds": round((stopped_at - started_at).total_seconds(), 3),
+        "publish_interval_seconds": float(started["interval_seconds"]),
+        "stored_message_count": message_count,
+        "first_stored_at": first_stored.isoformat() if first_stored else None,
+        "last_stored_at": last_stored.isoformat() if last_stored else None,
+        "series_cardinality": cardinality,
+        "database_volume_bytes": database_volume_bytes(env_file),
+        "publisher_messages_accepted": int(stopped["messages_accepted"]),
+        "publisher_messages_deferred": int(stopped["messages_deferred"]),
+        "publisher_tick_overruns": int(stopped["tick_overruns"]),
+        **network_measurements(network_capture, started_at),
+    }
+
+
+def default_output(configuration: str, summary: dict) -> Path:
+    timestamp = datetime.fromisoformat(summary["publisher_started_at"]).strftime(
+        "%Y%m%dT%H%M%SZ"
+    )
+    return PROJECT_ROOT / "experiments" / "run_summaries" / f"{configuration}_{timestamp}.json"
+
+
+def default_capture_file(configuration: str) -> Path:
+    return (
+        PROJECT_ROOT / "experiments" / "run_summaries"
+        / f".{configuration}_network_capture.json"
+    )
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description="Summarise one completed digital-twin run.")
+    parser.add_argument("--configuration", required=True, choices=["c1", "c2a", "c2b"])
+    parser.add_argument("--env-file", help="Compose environment file")
+    parser.add_argument("--output", type=Path, help="JSON output path")
+    stages = parser.add_mutually_exclusive_group()
+    stages.add_argument("--capture-start", action="store_true")
+    stages.add_argument("--capture-end", action="store_true")
+    parser.add_argument("--capture-file", type=Path, help="network checkpoint path")
+    args = parser.parse_args()
+
+    env_file = args.env_file or f"../config/env/{args.configuration}.env"
+    capture_file = args.capture_file or default_capture_file(args.configuration)
+    if args.capture_start or args.capture_end:
+        stage = "start" if args.capture_start else "end"
+        capture_network_counter(args.configuration, env_file, capture_file, stage)
+        print(f"Network {stage} checkpoint written to {capture_file}")
+        return 0
+
+    if not capture_file.exists():
+        raise RuntimeError("network checkpoints have not been captured for this run")
+    network_capture = json.loads(capture_file.read_text(encoding="utf-8"))
+    summary = create_summary(args.configuration, env_file, network_capture)
+    output = args.output or default_output(args.configuration, summary)
+    output.parent.mkdir(parents=True, exist_ok=True)
+    output.write_text(json.dumps(summary, indent=2) + "\n", encoding="utf-8")
+    print(f"Written to {output}")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
+
+===== src\twin\__init__.py =====
+
+===== src\twin\assets.py =====
+"""Load and validate the per-asset YAML config."""
+
+import yaml
+
+class AssetError(Exception):
+    """Raised when an asset configuration file is missing or malformed."""
+
+REQUIRED_STRUCTURE = {
+    "steady_state": ("supply_temperature", "return_temperature", "ambient_baseline"),
+    "dynamics": ("heating_time_constant_seconds", "cooling_time_constant_seconds"),
+    "duty_cycle": (
+        "operating_hours_start",
+        "operating_hours_end",
+        "cycle_period_seconds",
+        "on_fraction",
+    ),
+}
+
+def load_asset(path: str) -> dict:
+    """Read and validate an asset YAML file. Fails loudly on anything missing."""
+    try:
+        with open(path, "r", encoding="utf-8") as handle:
+            data = yaml.safe_load(handle)
+    except OSError as exc:
+        raise AssetError(f"could not read asset config {path!r}: {exc}") from exc
+    except yaml.YAMLError as exc:
+        raise AssetError(f"asset config {path!r} is not valid YAML: {exc}") from exc
+
+    if not isinstance(data, dict):
+        raise AssetError(f"asset config {path!r} must be a YAML mapping")
+
+    if not data.get("asset_id"):
+        raise AssetError(f"asset config {path!r} missing required field: asset_id")
+
+    for section, fields in REQUIRED_STRUCTURE.items():
+        if section not in data:
+            raise AssetError(f"asset config {path!r} missing required section: {section}")
+        if not isinstance(data[section], dict):
+            raise AssetError(f"asset config {path!r}: {section} must be a mapping")
+        for field in fields:
+            if field not in data[section]:
+                raise AssetError(
+                    f"asset config {path!r} missing required field: {section}.{field}"
+                )
+
+    duty = data["duty_cycle"]
+    if not 0 < duty["on_fraction"] <= 1:
+        raise AssetError(
+            f"asset config {path!r}: duty_cycle.on_fraction must be between 0 and 1, "
+            f"got {duty['on_fraction']}"
+        )
+    if not 0 <= duty["operating_hours_start"] < duty["operating_hours_end"] <= 24:
+        raise AssetError(
+            f"asset config {path!r}: operating hours must satisfy "
+            f"0 <= start < end <= 24, got {duty['operating_hours_start']} to "
+            f"{duty['operating_hours_end']}"
+        )
+
+    return data
+
+===== src\twin\capture_sample.py =====
+"""Capture 1,000 payload sizes from the self-hosted setup."""
+
+import json
+import os
+import sys
+import threading
+
+from twin.config import load_broker_config
+from twin.logging_setup import setup_logging
+from twin.mqtt_client import build_client, connect, disconnect
+from twin.payload import PayloadError, parse
+
+COMPONENT = "capture_sample"
+TARGET_MESSAGES = 1000
+OUTPUT_PATH = os.environ.get("PAYLOAD_SAMPLE_PATH", "payload_sample.json")
+
+def summarise(sizes: list[int]) -> dict:
+    """Mean, min and max byte size."""
+    return {
+        "message_count": len(sizes),
+        "mean_bytes": round(sum(sizes) / len(sizes), 2),
+        "min_bytes": min(sizes),
+        "max_bytes": max(sizes),
+    }
+
+def run() -> int:
+    logger = setup_logging(COMPONENT)
+    broker_config = load_broker_config()
+
+    asset_id = os.environ.get("ASSET_ID", "boiler_01")
+    topic = f"twin/{asset_id}/telemetry"
+
+    captured = []
+    sizes = []
+    complete = threading.Event()
+
+    def on_message(client, userdata, message):
+        if len(captured) >= TARGET_MESSAGES:
+            return
+        try:
+            payload = parse(message.payload)
+        except PayloadError as exc:
+            logger.error("malformed payload skipped", extra={"error": str(exc)})
+            return
+
+        sizes.append(len(message.payload))
+        captured.append(json.loads(message.payload.decode("utf-8")))
+
+        if len(captured) % 100 == 0:
+            logger.info("capture progress", extra={"captured": len(captured)})
+
+        if len(captured) >= TARGET_MESSAGES:
+            complete.set()
+
+    client = build_client(broker_config, f"twin-capture-{asset_id}", COMPONENT)
+    client.on_message = on_message
+    connect(client, broker_config)
+    client.subscribe(topic, qos=broker_config.qos)
+
+    logger.info("capture started", extra={"topic": topic, "target": TARGET_MESSAGES})
+    complete.wait()
+    disconnect(client)
+
+    summary = summarise(sizes)
+    with open(OUTPUT_PATH, "w", encoding="utf-8") as handle:
+        json.dump({"summary": summary, "messages": captured}, handle, indent=2)
+
+    logger.info("capture complete", extra={**summary, "output": OUTPUT_PATH})
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(run())
+
+===== src\twin\config.py =====
+"""Read and validate the environment settings used by each service.
+
+The environment handling follows https://docs.python.org/3/library/os.html#os.environ
+and https://12factor.net/config. AI prompt used: "Design typed Python configuration
+loaders that validate only the
+  environment variables required by each service and raise named errors."
+"""
+
+import os
+from dataclasses import dataclass
+from typing import Optional
+
+
+class ConfigError(Exception):
+    """Raised when a required environment variable is missing or invalid."""
+
+
+# --- internal helpers ----------------------------------------------
+
+def _require(name: str) -> str:
+    value = os.environ.get(name)
+    if not value:
+        raise ConfigError(f"Missing required environment variable: {name}")
+    return value
+
+def _require_int(name: str) -> int:
+    raw = _require(name)
+    try:
+        return int(raw)
+    except ValueError:
+        raise ConfigError(f"Environment variable {name}={raw!r} is not a valid integer")
+
+
+def _require_float(name: str) -> float:
+    raw = _require(name)
+    try:
+        return float(raw)
+    except ValueError:
+        raise ConfigError(f"Environment variable {name}={raw!r} is not a valid number")
+
+
+def _require_bool(name: str) -> bool:
+    raw = _require(name).strip().lower()
+    if raw in ("true", "1", "yes"):
+        return True
+    if raw in ("false", "0", "no"):
+        return False
+    raise ConfigError(f"Environment variable {name}={raw!r} must be true/false")
+
+
+def _require_existing_file(name: str) -> str:
+    path = _require(name)
+    if not os.path.isfile(path):
+        raise ConfigError(f"{name}={path!r} does not point to an existing file")
+    return path
+
+def _require_qos(name: str) -> int:
+    raw = _require(name)
+    try:
+        value = int(raw)
+    except ValueError:
+        raise ConfigError(f"Environment variable {name}={raw!r} is not a valid integer")
+    if value not in (0, 1, 2):
+        raise ConfigError(f"{name}={value} must be 0, 1 or 2")
+    return value
+
+
+def _optional(name: str, default: str) -> str:
+    return os.environ.get(name, default)
+
+# --- broker config ------------------------------------------------------
+
+@dataclass(frozen=True)
+class BrokerConfig:
+    host: str
+    port: int
+    tls: bool
+    auth_mode: str          # "password" or "cert"
+    username: Optional[str]
+    password: Optional[str]
+    ca_cert: Optional[str]
+    client_cert: Optional[str]
+    client_key: Optional[str]
+    keepalive: int
+    qos: int
+
+
+def load_broker_config() -> BrokerConfig:
+    """
+    shared by every entrypoint that talks to a broker (publisher.py,
+    storage_writer.py, and any mqtt client).
+
+    auth_mode branches the required variables, because C1/C2a use
+    username+password while C2b (AWS IoT Core) uses mutual TLS with
+    X.509 certificates â€” materially different, not a variant of the same
+    thing.
+
+    values to be added to env instead of hardcoding
+    """
+    host = _require("BROKER_HOST")
+    port = _require_int("BROKER_PORT")
+    tls = _require_bool("BROKER_TLS")
+    auth_mode = _require("BROKER_AUTH_MODE").strip().lower()
+
+    if auth_mode not in ("password", "cert"):
+        raise ConfigError(
+            f"BROKER_AUTH_MODE={auth_mode!r} must be 'password' or 'cert' "
+            "('password' for C1/C2a, 'cert' for C2b)"
+        )
+
+    username = password = None
+    ca_cert = client_cert = client_key = None
+
+    # Password authentication can still use a private TLS CA (C1). Managed
+    # brokers may omit this and use the operating system trust store instead.
+    if tls and os.environ.get("BROKER_CA_CERT"):
+        ca_cert = _require_existing_file("BROKER_CA_CERT")
+
+    if auth_mode == "password":
+        username = _require("BROKER_USERNAME")
+        password = _require("BROKER_PASSWORD")
+    else:
+        ca_cert = _require_existing_file("BROKER_CA_CERT")
+        client_cert = _require_existing_file("BROKER_CLIENT_CERT")
+        client_key = _require_existing_file("BROKER_CLIENT_KEY")
+
+    keepalive = int(_optional("BROKER_KEEPALIVE", "60"))
+    qos = _require_qos("MQTT_QOS")
+
+    return BrokerConfig(
+        host=host, port=port, tls=tls, auth_mode=auth_mode,
+        username=username, password=password,
+        ca_cert=ca_cert, client_cert=client_cert, client_key=client_key,
+        keepalive=keepalive, qos=qos,
+    )
+
+# --- InfluxDB config ------------------------------------------------------
+
+@dataclass(frozen=True)
+class InfluxConfig:
+    url: str
+    token: str
+    org: str
+    bucket: str
+
+def load_influx_config() -> InfluxConfig:
+    """Needed only by storage_writer.py and the M1.6 payload-capture utility."""
+    return InfluxConfig(
+        url=_require("INFLUX_URL"),
+        token=_require("INFLUX_TOKEN"),
+        org=_require("INFLUX_ORG"),
+        bucket=_require("INFLUX_BUCKET"),
+    )
+
+# --- workload config ------------------------------------------------------
+
+@dataclass(frozen=True)
+class WorkloadConfig:
+    asset_config_path: str
+    publish_interval_seconds: float
+
+
+def load_workload_config() -> WorkloadConfig:
+    """Needed only by publisher.py: which asset to simulate, how often to publish."""
+    asset_path = _require_existing_file("ASSET_CONFIG_PATH")
+
+    interval = _require_float("PUBLISH_INTERVAL_SECONDS")
+    if interval <= 0:
+        raise ConfigError(f"PUBLISH_INTERVAL_SECONDS={interval} must be greater than 0")
+
+    return WorkloadConfig(
+        asset_config_path=asset_path,
+        publish_interval_seconds=interval,
+    )
+
+===== src\twin\logging_setup.py =====
+"""Write structured JSON logs to stdout for Docker to collect.
+
+This follows https://docs.python.org/3/library/logging.html. AI prompt used:
+"Create a Python logging formatter that writes one JSON object per
+  line, preserves extra fields, and formats timestamps in UTC milliseconds."
+"""
+
+import json
+import logging
+import os
+import sys
+from datetime import datetime, timezone
+
+_RESERVED_LOGRECORD_ATTRS = {
+    "name", "msg", "args", "levelname", "levelno", "pathname", "filename",
+    "module", "exc_info", "exc_text", "stack_info", "lineno", "funcName",
+    "created", "msecs", "relativeCreated", "thread", "threadName",
+    "processName", "process", "taskName", "message", "asctime",
+}
+
+class JSONFormatter(logging.Formatter):
+    def format(self, record: logging.LogRecord) -> str:
+        payload = {
+            "timestamp": datetime.fromtimestamp(
+                record.created, tz=timezone.utc
+            ).isoformat(timespec="milliseconds"),
+            "level": record.levelname,
+            "component": record.name,
+            "message": record.getMessage(),
+        }
+
+        # Extra structured fields, e.g.
+        # logger.info("reconnect attempt", extra={"asset_id": "boiler_01", "attempt": 3})
+        for key, value in record.__dict__.items():
+            if key not in _RESERVED_LOGRECORD_ATTRS:
+                payload[key] = value
+
+        if record.exc_info:
+            payload["exception"] = self.formatException(record.exc_info)
+
+        return json.dumps(payload, default=str)
+
+def setup_logging(component: str, level: str | None = None) -> logging.Logger:
+    """Set up one component logger without adding duplicate handlers."""
+    resolved_level = (level or os.environ.get("LOG_LEVEL", "INFO")).upper()
+
+    logger = logging.getLogger(component)
+    logger.setLevel(resolved_level)
+    logger.propagate = False
+
+    if logger.handlers:
+        # Reusing a component should not double every log line.
+        return logger
+
+    handler = logging.StreamHandler(sys.stdout)
+    handler.setFormatter(JSONFormatter())
+    logger.addHandler(handler)
+
+    return logger
+
+===== src\twin\mqtt_client.py =====
+"""Shared MQTT setup for the publisher and storage writer.
+
+The client and callback behaviour follows the Paho documentation at
+https://eclipse.dev/paho/files/paho.mqtt.python/html/client.html. AI prompt used:
+"Build a shared Paho MQTT v2 client helper supporting password and
+  certificate authentication, bounded reconnect backoff, and a timed wait for
+  the initial CONNACK without losing the normal on_connect callback."
+"""
+
+import ssl
+import threading
+
+import paho.mqtt.client as mqtt
+
+from twin.config import BrokerConfig
+from twin.logging_setup import setup_logging
+
+# Reconnect backoff bounds, seconds. paho doubles the delay on each failed
+# attempt between these values.
+RECONNECT_MIN_DELAY = 1
+RECONNECT_MAX_DELAY = 32
+
+class MQTTClientError(Exception):
+    """Raised when a client cannot be constructed or the initial connect fails."""
+
+
+def build_client(config: BrokerConfig, client_id: str, component: str) -> mqtt.Client:
+    """Build a configured client without connecting it yet."""
+    logger = setup_logging(component)
+
+    client = mqtt.Client(
+        callback_api_version=mqtt.CallbackAPIVersion.VERSION2,
+        client_id=client_id,
+        protocol=mqtt.MQTTv311,
+        clean_session=False if config.qos > 0 else True,
+    )
+
+    if config.auth_mode == "password":
+        client.username_pw_set(config.username, config.password)
+        if config.tls:
+            client.tls_set(ca_certs=config.ca_cert, tls_version=ssl.PROTOCOL_TLSv1_2)
+    else:
+        client.tls_set(
+            ca_certs=config.ca_cert,
+            certfile=config.client_cert,
+            keyfile=config.client_key,
+            tls_version=ssl.PROTOCOL_TLSv1_2,
+        )
+
+    client.reconnect_delay_set(
+        min_delay=RECONNECT_MIN_DELAY,
+        max_delay=RECONNECT_MAX_DELAY,
+    )
+
+    _attach_logging_callbacks(client, logger, component)
+
+    return client
+
+def _attach_logging_callbacks(client: mqtt.Client, logger, component: str) -> None:
+    """Log connection changes used by the fault-injection runs."""
+
+    def on_connect(client, userdata, flags, reason_code, properties):
+        if reason_code == 0:
+            logger.info(
+                "broker connected",
+                extra={"event": "connected", "component": component},
+            )
+        else:
+            logger.error(
+                "broker connection refused",
+                extra={
+                    "event": "connect_refused",
+                    "reason_code": reason_code.value,
+                    "component": component,
+                },
+            )
+    def on_disconnect(client, userdata, flags, reason_code, properties):
+        # Zero is our clean shutdown; anything else may be the injected fault.
+        expected = reason_code.value == 0
+        logger.warning(
+            "broker disconnected",
+            extra={
+                "event": "disconnected",
+                "expected": expected,
+                "reason_code": reason_code.value,
+                "component": component,
+            },
+        )
+    client.on_connect = on_connect
+    client.on_disconnect = on_disconnect
+
+def connect(client: mqtt.Client, config: BrokerConfig, timeout: float = 10.0) -> None:
+    """Connect, wait for CONNACK, then leave Paho's network loop running."""
+    connected = threading.Event()
+    # AI prompt used: "Temporarily wrap
+    # on_connect to signal initial CONNACK, then
+    # restore the existing lifecycle callback after connection succeeds."
+    original_on_connect = client.on_connect
+
+    def on_connect_wrapper(client, userdata, flags, reason_code, properties):
+        original_on_connect(client, userdata, flags, reason_code, properties)
+        if reason_code == 0:
+            connected.set()
+
+    client.on_connect = on_connect_wrapper
+
+    try:
+        client.connect(config.host, config.port, keepalive=config.keepalive)
+    except (OSError, ssl.SSLError) as exc:
+        raise MQTTClientError(
+            f"could not connect to {config.host}:{config.port}: {exc}"
+        ) from exc
+
+    client.loop_start()
+
+    if not connected.wait(timeout=timeout):
+        client.loop_stop()
+        raise MQTTClientError(
+            f"no CONNACK from {config.host}:{config.port} within {timeout}s"
+        )
+
+    client.on_connect = original_on_connect
+
+def disconnect(client: mqtt.Client) -> None:
+    """Send DISCONNECT before stopping the network loop."""
+    client.disconnect()
+    client.loop_stop()
+
+===== src\twin\payload.py =====
+"""Build, validate, and parse telemetry payloads.
+
+The implementation uses Python's json and dataclasses documentation. AI prompt
+used: "Define an immutable telemetry payload with strict field, channel,
+  sequence, timestamp, and schema-version validation for build and parse paths."
+"""
+
+import json
+from dataclasses import asdict, dataclass
+from datetime import datetime
+
+SCHEMA_VERSION = "1.0"
+
+# Keep the channel list in one place; the simulator and tests use it too.
+CHANNELS = (
+    "supply_temperature_c",
+    "return_temperature_c",
+    "ambient_temperature_c",
+    "power_draw_kw",
+    "setpoint_c",
+)
+
+_NON_CHANNEL_FIELDS = ("asset_id", "timestamp", "sequence", "schema_version")
+_ALL_FIELDS = frozenset(_NON_CHANNEL_FIELDS + CHANNELS)
+
+class PayloadError(Exception):
+    """Raised when a payload cannot be built, or a received payload is malformed."""
+
+@dataclass(frozen=True)
+class TelemetryPayload:
+    asset_id: str
+    timestamp: str  # ISO-8601, UTC, millisecond precision â€” matches logging_setup.py
+    sequence: int
+    schema_version: str
+    supply_temperature_c: float
+    return_temperature_c: float
+    ambient_temperature_c: float
+    power_draw_kw: float
+    setpoint_c: float
+
+def build_payload(asset_id: str, sequence: int, timestamp: datetime, readings: dict) -> TelemetryPayload:
+    """Build one payload from a simulator reading."""
+    if not asset_id or not isinstance(asset_id, str):
+        raise PayloadError(f"asset_id must be a non-empty string, got {asset_id!r}")
+
+    if not isinstance(sequence, int) or isinstance(sequence, bool) or sequence < 0:
+        raise PayloadError(f"sequence must be a non-negative integer, got {sequence!r}")
+
+    if not isinstance(timestamp, datetime) or timestamp.tzinfo is None:
+        raise PayloadError(f"timestamp must be a timezone-aware datetime, got {timestamp!r}")
+    if timestamp.utcoffset().total_seconds() != 0:
+        raise PayloadError(f"timestamp must be UTC (offset 0), got offset {timestamp.utcoffset()}")
+
+    _validate_channels(readings)
+
+    return TelemetryPayload(
+        asset_id=asset_id,
+        timestamp=timestamp.isoformat(timespec="milliseconds"),
+        sequence=sequence,
+        schema_version=SCHEMA_VERSION,
+        **{channel: float(readings[channel]) for channel in CHANNELS},
+    )
+
+def _validate_channels(readings: dict) -> None:
+    if not isinstance(readings, dict):
+        raise PayloadError(f"readings must be a dict, got {type(readings).__name__}")
+
+    missing = set(CHANNELS) - readings.keys()
+    if missing:
+        raise PayloadError(f"readings missing channel(s): {sorted(missing)}")
+
+    extra = readings.keys() - set(CHANNELS)
+    if extra:
+        raise PayloadError(f"readings has unexpected channel(s): {sorted(extra)}")
+
+    for channel in CHANNELS:
+        value = readings[channel]
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            raise PayloadError(f"readings[{channel!r}] must be a number, got {value!r}")
+
+def serialize(payload: TelemetryPayload) -> bytes:
+
+    """UTF-8 JSON, sorted keys â€” deterministic, so byte size is comparable run to run (M1.6)."""
+    return json.dumps(asdict(payload), sort_keys=True).encode("utf-8")
+
+def parse(raw: bytes) -> TelemetryPayload:
+    """Parse wire data and reject anything outside the current schema."""
+    try:
+        data = json.loads(raw.decode("utf-8"))
+    except (json.JSONDecodeError, UnicodeDecodeError) as exc:
+        raise PayloadError(f"payload is not valid UTF-8 JSON: {exc}") from exc
+
+    if not isinstance(data, dict):
+        raise PayloadError(f"payload must be a JSON object, got {type(data).__name__}")
+
+    missing = _ALL_FIELDS - data.keys()
+    if missing:
+        raise PayloadError(f"payload missing required field(s): {sorted(missing)}")
+
+    extra = data.keys() - _ALL_FIELDS
+    if extra:
+        raise PayloadError(f"payload has unexpected field(s): {sorted(extra)}")
+
+    if data["schema_version"] != SCHEMA_VERSION:
+        raise PayloadError(
+            f"unsupported schema_version {data['schema_version']!r}, expected {SCHEMA_VERSION!r}"
+        )
+
+    if not isinstance(data["sequence"], int) or isinstance(data["sequence"], bool) or data["sequence"] < 0:
+        raise PayloadError(f"sequence must be a non-negative integer, got {data['sequence']!r}")
+
+    if not isinstance(data["asset_id"], str) or not data["asset_id"]:
+        raise PayloadError(f"asset_id must be a non-empty string, got {data['asset_id']!r}")
+
+    for channel in CHANNELS:
+        value = data[channel]
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            raise PayloadError(f"{channel} must be a number, got {value!r}")
+
+    return TelemetryPayload(**data)
+
+===== src\twin\publisher.py =====
+"""Simulate one asset and publish its telemetry on a fixed interval.
+
+The scheduler follows https://docs.python.org/3/library/time.html#time.monotonic.
+AI prompt used: "Implement a
+stoppable telemetry publisher whose tick deadlines are
+  calculated from one monotonic start time rather than repeated fixed sleeps."
+"""
+
+import os
+import signal
+import sys
+import time
+from datetime import datetime, timezone
+
+import paho.mqtt.client as mqtt
+
+from twin.assets import load_asset
+from twin.config import load_broker_config, load_workload_config
+from twin.logging_setup import setup_logging
+from twin.mqtt_client import build_client, connect, disconnect
+from twin.payload import build_payload, serialize
+from twin.simulator import simulate
+
+COMPONENT = "publisher"
+PROGRESS_EVERY_MESSAGES = 20
+
+# Fixed so runs stay comparable.
+AMBIENT_TEMPERATURE_C = 12.0
+
+_shutdown_requested = False
+_snapshot_requested = False
+
+def _handle_shutdown(signum, frame):
+    """Leave enough time for MQTT to send a clean disconnect."""
+    global _shutdown_requested
+    _shutdown_requested = True
+
+def _handle_snapshot(signum, frame):
+    global _snapshot_requested
+    _snapshot_requested = True
+
+def topic_for(asset_id: str) -> str:
+    return f"twin/{asset_id}/telemetry"
+
+def next_tick_delay(start: float, sequence: int, interval: float, now: float) -> float:
+    """Return the delay to an absolute tick, or a negative value if it was missed."""
+    # AI prompt used: "Calculate deadlines
+    # from the original monotonic start so earlier
+    # work cannot accumulate scheduling drift."
+    return start + (sequence * interval) - now
+
+def sleep_duration(deadline: float, now: float) -> float:
+    """Return a non-negative, shutdown-responsive scheduler sleep duration."""
+    return max(0.0, min(0.5, deadline - now))
+
+def publish_outcome(qos: int, reason_code: int) -> str:
+    """Classify whether Paho accepted, deferred, or rejected a publish."""
+    if reason_code == mqtt.MQTT_ERR_SUCCESS:
+        return "accepted"
+    if qos > 0 and reason_code == mqtt.MQTT_ERR_NO_CONN:
+        return "deferred"
+    return "failed"
+
+def should_log_progress(sequence: int) -> bool:
+    """Return True after each group of twenty zero-based message sequences."""
+    return (sequence + 1) % PROGRESS_EVERY_MESSAGES == 0
+
+def run() -> int:
+    global _snapshot_requested
+    logger = setup_logging(COMPONENT)
+
+    signal.signal(signal.SIGTERM, _handle_shutdown)
+    signal.signal(signal.SIGINT, _handle_shutdown)
+    if hasattr(signal, "SIGUSR1"):
+        signal.signal(signal.SIGUSR1, _handle_snapshot)
+
+    broker_config = load_broker_config()
+    workload_config = load_workload_config()
+    asset = load_asset(workload_config.asset_config_path)
+
+    asset_id = asset["asset_id"]
+    topic = topic_for(asset_id)
+    interval = workload_config.publish_interval_seconds
+
+    client_id = os.environ.get("MQTT_CLIENT_ID", f"twin-publisher-{asset_id}")
+    client = build_client(broker_config, client_id, COMPONENT)
+    connect(client, broker_config)
+
+    logger.info(
+        "publisher started",
+        extra={
+            "event": "started",
+            "asset_id": asset_id,
+            "topic": topic,
+            "interval_seconds": interval,
+            "qos": broker_config.qos,
+        },
+    )
+
+    sequence = 0
+    accepted = 0
+    deferred = 0
+    overruns = 0
+    start = time.monotonic()
+
+    while not _shutdown_requested:
+        timestamp = datetime.now(timezone.utc)
+
+        readings = simulate(asset, timestamp, AMBIENT_TEMPERATURE_C)
+        payload = build_payload(asset_id, sequence, timestamp, readings)
+
+        result = client.publish(topic, serialize(payload), qos=broker_config.qos)
+        outcome = publish_outcome(broker_config.qos, result.rc)
+
+        if outcome == "deferred":
+            accepted += 1
+            deferred += 1
+            logger.warning(
+                "publish queued until reconnect",
+                extra={
+                    "event": "publish_deferred",
+                    "sequence": sequence,
+                    "reason_code": int(result.rc),
+                },
+            )
+        elif outcome == "failed":
+            logger.error(
+                "publish failed",
+                extra={
+                    "event": "publish_failed",
+                    "sequence": sequence,
+                    "reason_code": int(result.rc),
+                },
+            )
+        else:
+            accepted += 1
+
+        sequence += 1
+
+        # Always schedule from the original start so slow ticks do not add drift.
+        remaining = next_tick_delay(start, sequence, interval, time.monotonic())
+
+        overran = remaining < 0
+        if overran:
+            overruns += 1
+            # Keep overruns visible in the experiment results.
+            logger.warning(
+                "tick overran interval",
+                extra={"event": "tick_overrun", "sequence": sequence, "late_by_seconds": -remaining},
+            )
+
+        current_sequence = sequence - 1
+        if should_log_progress(current_sequence):
+            logger.info(
+                "publisher progress",
+                extra={
+                    "event": "publish_progress",
+                    "sequence": current_sequence,
+                    "messages_accepted": accepted,
+                    "messages_deferred": deferred,
+                    "tick_overruns": overruns,
+                },
+            )
+
+        if _snapshot_requested:
+            logger.info(
+                "publisher snapshot",
+                extra={
+                    "event": "publisher_snapshot",
+                    "sequence": current_sequence,
+                    "messages_accepted": accepted,
+                    "messages_deferred": deferred,
+                    "tick_overruns": overruns,
+                },
+            )
+            _snapshot_requested = False
+
+        if overran:
+            continue
+
+        # Short sleeps keep shutdown responsive even with a long interval.
+        deadline = time.monotonic() + remaining
+        while time.monotonic() < deadline and not _shutdown_requested:
+            time.sleep(sleep_duration(deadline, time.monotonic()))
+
+    logger.info(
+        "publisher stopping",
+        extra={
+            "event": "stopping",
+            "messages_accepted": accepted,
+            "messages_deferred": deferred,
+            "tick_overruns": overruns,
+            "final_sequence": sequence - 1 if sequence else None,
+        },
+    )
+
+    disconnect(client)
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(run())
+
+===== src\twin\query.py =====
+"""Shared read queries for telemetry stored in InfluxDB.
+
+The query construction follows the InfluxDB Python and Flux documentation at
+https://docs.influxdata.com/influxdb/v2/api-guide/client-libraries/python/.
+AI prompt used:
+"Create reusable InfluxDB Flux query helpers using escaped values and
+  explicit timezone-aware time windows."
+"""
+
+import json
+from datetime import datetime, timezone
+
+
+MEASUREMENT = "telemetry"
+SEQUENCE_FIELD = "sequence"
+
+
+def _flux_string(value: str) -> str:
+    return json.dumps(value)
+
+
+def _flux_time(value: datetime) -> str:
+    if value.tzinfo is None or value.utcoffset() is None:
+        raise ValueError("query timestamps must be timezone-aware")
+    timestamp = value.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
+    return f"time(v: {_flux_string(timestamp)})"
+
+
+def _sequence_query(bucket: str, asset_id: str, start: datetime, stop: datetime) -> str:
+    return f'''from(bucket: {_flux_string(bucket)})
+  |> range(start: {_flux_time(start)}, stop: {_flux_time(stop)})
+  |> filter(fn: (r) => r._measurement == {_flux_string(MEASUREMENT)})
+  |> filter(fn: (r) => r.asset_id == {_flux_string(asset_id)})
+  |> filter(fn: (r) => r._field == {_flux_string(SEQUENCE_FIELD)})'''
+
+
+def _records(tables):
+    for table in tables:
+        yield from table.records
+
+
+def fetch_sequences(query_api, bucket: str, asset_id: str,
+                    start: datetime, stop: datetime) -> set[int]:
+    """Return stored sequence numbers for an asset in a time window."""
+    tables = query_api.query(_sequence_query(bucket, asset_id, start, stop))
+    return {int(record.get_value()) for record in _records(tables)}
+
+
+def fetch_time_bounds(query_api, bucket: str, asset_id: str,
+                      start: datetime, stop: datetime) -> tuple[datetime | None, datetime | None]:
+    """Return the earliest and latest stored telemetry timestamps in a window."""
+    base = _sequence_query(bucket, asset_id, start, stop)
+    first = list(_records(query_api.query(f"{base}\n  |> first()")))
+    last = list(_records(query_api.query(f"{base}\n  |> last()")))
+    return (
+        first[0].get_time() if first else None,
+        last[0].get_time() if last else None,
+    )
+
+
+def fetch_point_count(query_api, bucket: str, asset_id: str,
+                      start: datetime, stop: datetime) -> int:
+    """Count telemetry messages through their single sequence field."""
+    query = f"{_sequence_query(bucket, asset_id, start, stop)}\n  |> count()"
+    return sum(int(record.get_value()) for record in _records(query_api.query(query)))
+
+
+def fetch_series_cardinality(query_api, bucket: str,
+                             start: datetime, stop: datetime) -> int:
+    """Count distinct asset series; asset_id is the schema's only tag."""
+    query = f'''from(bucket: {_flux_string(bucket)})
+  |> range(start: {_flux_time(start)}, stop: {_flux_time(stop)})
+  |> filter(fn: (r) => r._measurement == {_flux_string(MEASUREMENT)})
+  |> filter(fn: (r) => r._field == {_flux_string(SEQUENCE_FIELD)})
+  |> group()
+  |> distinct(column: "asset_id")
+  |> count()'''
+    return sum(int(record.get_value()) for record in _records(query_api.query(query)))
+
+===== src\twin\simulator.py =====
+"""A deterministic boiler simulator using Newton-style heating and cooling.
+
+The exponential model is based on Newton's law of cooling, described at
+https://open.lib.umn.edu/app/uploads/sites/230/2020/08/Newton-Law-of-Cooling.pdf.
+AI prompt used: "Implement a pure boiler simulator using exponential heating and
+  cooling, a repeating duty cycle, and a cold start per operating window."
+"""
+
+from datetime import datetime
+import math
+
+
+def simulate(asset_config: dict, timestamp: datetime, ambient_temperature: float) -> dict:
+    """Compute sensor readings at a given timestamp."""
+    
+    if timestamp.tzinfo is None or timestamp.utcoffset().total_seconds() != 0:
+        raise ValueError("timestamp must be UTC")
+    
+    supply_setpoint = asset_config["steady_state"]["supply_temperature"]
+    return_delta = (asset_config["steady_state"]["supply_temperature"] - 
+                    asset_config["steady_state"]["return_temperature"])
+    ambient_baseline = asset_config["steady_state"]["ambient_baseline"]
+    tau_heat = asset_config["dynamics"]["heating_time_constant_seconds"]
+    tau_cool = asset_config["dynamics"]["cooling_time_constant_seconds"]
+    
+    op_start = asset_config["duty_cycle"]["operating_hours_start"]
+    op_end = asset_config["duty_cycle"]["operating_hours_end"]
+    cycle_period = asset_config["duty_cycle"]["cycle_period_seconds"]
+    on_fraction = asset_config["duty_cycle"]["on_fraction"]
+
+    # The boiler sits at its baseline outside the operating window.
+    hour_of_day = timestamp.hour
+    if not (op_start <= hour_of_day < op_end):
+        return {
+            "supply_temperature_c": ambient_baseline,
+            "return_temperature_c": ambient_baseline,
+            "ambient_temperature_c": ambient_temperature,
+            "power_draw_kw": 0.0,
+            "setpoint_c": supply_setpoint,
+        }
+    
+    # Seconds since today's operating window opened.
+    seconds_into_window = (timestamp.hour - op_start) * 3600 + timestamp.minute * 60 + timestamp.second
+    
+    cycle_position = seconds_into_window % cycle_period
+    completed_cycles = int(seconds_into_window // cycle_period)
+
+    on_duration = cycle_period * on_fraction
+    off_duration = cycle_period - on_duration
+
+    # Cold start at the beginning of each operating day.
+    cycle_start_temp = ambient_baseline
+
+    # AI prompt used: "Replay
+    # completed phases mathematically so the current cycle
+    # starts at the correct residual temperature without mutable history."
+    # Carry residual heat through the completed cycles.
+    for _ in range(completed_cycles):
+        end_of_heating = supply_setpoint + (
+            cycle_start_temp - supply_setpoint
+        ) * math.exp(-on_duration / tau_heat)
+
+        cycle_start_temp = ambient_baseline + (
+            end_of_heating - ambient_baseline
+        ) * math.exp(-off_duration / tau_cool)
+
+    boiler_on = cycle_position < on_duration
+
+    if boiler_on:
+        time_in_state = cycle_position
+        supply_temp = supply_setpoint + (
+            cycle_start_temp - supply_setpoint
+        ) * math.exp(-time_in_state / tau_heat)
+    else:
+        time_in_state = cycle_position - on_duration
+
+        end_of_heating = supply_setpoint + (
+            cycle_start_temp - supply_setpoint
+        ) * math.exp(-on_duration / tau_heat)
+
+        supply_temp = ambient_baseline + (
+            end_of_heating - ambient_baseline
+        ) * math.exp(-time_in_state / tau_cool)
+
+    return_temp = supply_temp - return_delta
+    power_draw = 5.0 if boiler_on else 0.0
+    
+    return {
+        "supply_temperature_c": round(supply_temp, 2),
+        "return_temperature_c": round(return_temp, 2),
+        "ambient_temperature_c": ambient_temperature,
+        "power_draw_kw": power_draw,
+        "setpoint_c": supply_setpoint,
+    }
+
+===== src\twin\storage_writer.py =====
+"""Validate MQTT telemetry and write it to InfluxDB.
+
+The MQTT and point-writing behaviour follows the Paho and InfluxDB Python client
+documentation. AI prompt used: "Design an MQTT storage callback that validates telemetry, writes an
+  InfluxDB point, detects sequence gaps, and logs one recovery transition."
+"""
+
+import os
+import signal
+import sys
+import threading
+
+from influxdb_client import InfluxDBClient, Point, WritePrecision
+from influxdb_client.client.write_api import SYNCHRONOUS
+
+from twin.config import load_broker_config, load_influx_config
+from twin.logging_setup import setup_logging
+from twin.mqtt_client import build_client, connect, disconnect
+from twin.payload import CHANNELS, PayloadError, TelemetryPayload, parse
+
+COMPONENT = "storage_writer"
+MEASUREMENT = "telemetry"
+
+_shutdown_requested = threading.Event()
+
+
+def _handle_shutdown(signum, frame):
+    _shutdown_requested.set()
+
+
+def topic_for(asset_id: str) -> str:
+    return f"twin/{asset_id}/telemetry"
+
+def attach_subscription_callback(client, topic: str, qos: int) -> None:
+    """Subscribe after every successful connection, including reconnects."""
+    lifecycle_on_connect = client.on_connect
+
+    def on_connect(client, userdata, flags, reason_code, properties):
+        lifecycle_on_connect(client, userdata, flags, reason_code, properties)
+        if reason_code == 0:
+            client.subscribe(topic, qos=qos)
+
+    client.on_connect = on_connect
+
+def to_point(payload: TelemetryPayload) -> Point:
+    """Turn a validated payload into an InfluxDB point."""
+    # Sequence stays a field; using it as a tag would create unbounded cardinality.
+    point = (
+        Point(MEASUREMENT)
+        .tag("asset_id", payload.asset_id)
+        .field("sequence", payload.sequence)
+        .time(payload.timestamp, WritePrecision.MS)
+    )
+    for channel in CHANNELS:
+        point = point.field(channel, float(getattr(payload, channel)))
+    return point
+
+class SequenceTracker:
+    """Track the last sequence per asset and report gaps."""
+
+    def __init__(self):
+        self._last = {}
+
+    def check(self, asset_id: str, sequence: int) -> int:
+        """Return how many messages are missing before this one."""
+        previous = self._last.get(asset_id)
+        self._last[asset_id] = sequence
+
+        if previous is None or sequence <= previous:
+            # A lower or repeated sequence means the publisher restarted, or
+            # the broker redelivered. Neither is a gap.
+            return 0
+        return sequence - previous - 1
+
+class WriteFailureState:
+    """Track consecutive database write failures until storage recovers."""
+
+    # AI prompt used: "Report recovery only
+    # on the first successful write after one or
+    # more consecutive failures."
+
+    def __init__(self):
+        self.failures = 0
+
+    def record_failure(self) -> None:
+        self.failures += 1
+
+    def record_success(self) -> int:
+        failures = self.failures
+        self.failures = 0
+        return failures
+
+def run() -> int:
+    logger = setup_logging(COMPONENT)
+
+    signal.signal(signal.SIGTERM, _handle_shutdown)
+    signal.signal(signal.SIGINT, _handle_shutdown)
+
+    broker_config = load_broker_config()
+    influx_config = load_influx_config()
+
+    asset_id = os.environ.get("ASSET_ID", "boiler_01")
+    topic = topic_for(asset_id)
+
+    influx = InfluxDBClient(
+        url=influx_config.url, token=influx_config.token, org=influx_config.org
+    )
+    write_api = influx.write_api(write_options=SYNCHRONOUS)
+
+    tracker = SequenceTracker()
+    write_failure_state = WriteFailureState()
+    client_id = os.environ.get("MQTT_CLIENT_ID", f"twin-storage-{asset_id}")
+    client = build_client(broker_config, client_id, COMPONENT)
+
+    def on_message(client, userdata, message):
+        handle_message(
+            message.payload,
+            write_api,
+            influx_config.bucket,
+            tracker,
+            logger,
+            write_failure_state,
+        )
+
+    client.on_message = on_message
+    attach_subscription_callback(client, topic, broker_config.qos)
+
+    connect(client, broker_config)
+
+    logger.info(
+        "storage writer started",
+        extra={"event": "started", "topic": topic, "bucket": influx_config.bucket,
+               "qos": broker_config.qos},
+    )
+
+    _shutdown_requested.wait()
+
+    logger.info("storage writer stopping", extra={"event": "stopping"})
+    disconnect(client)
+    influx.close()
+    return 0
+
+def handle_message(
+    raw: bytes,
+    write_api,
+    bucket: str,
+    tracker: SequenceTracker,
+    logger,
+    write_failure_state: WriteFailureState | None = None,
+) -> bool:
+    """Process one message and return whether it reached InfluxDB."""
+    try:
+        payload = parse(raw)
+    except PayloadError as exc:
+        logger.error("malformed payload discarded", extra={"event": "payload_rejected", "error": str(exc)})
+        return False
+
+    missing = tracker.check(payload.asset_id, payload.sequence)
+    if missing:
+        logger.warning(
+            "sequence gap detected",
+            extra={"event": "sequence_gap", "asset_id": payload.asset_id,
+                   "sequence": payload.sequence, "messages_missing": missing},
+        )
+
+    try:
+        write_api.write(bucket=bucket, record=to_point(payload))
+    except Exception as exc:
+        if write_failure_state is not None:
+            write_failure_state.record_failure()
+        # Keep the callback alive so a storage recovery can still be observed.
+        logger.error(
+            "influx write failed",
+            extra={"event": "write_failed", "sequence": payload.sequence, "error": str(exc)},
+        )
+        return False
+
+    failures = write_failure_state.record_success() if write_failure_state else 0
+    if failures:
+        logger.info(
+            "influx write recovered",
+            extra={
+                "event": "write_recovered",
+                "sequence": payload.sequence,
+                "failures_since_last_success": failures,
+            },
+        )
+
+    return True
+
+
+if __name__ == "__main__":
+    sys.exit(run())
+
+===== tests\test_asset.py =====
+"""
+Asset file loading and the validation around it.
+"""
+
+import pytest
+
+from twin.assets import AssetError, load_asset
+
+VALID_YAML = """
+asset_id: boiler_01
+asset_type: thermal_system
+
+steady_state:
+  supply_temperature: 65.0
+  return_temperature: 55.0
+  ambient_baseline: 20.0
+
+dynamics:
+  heating_time_constant_seconds: 25
+  cooling_time_constant_seconds: 600
+
+duty_cycle:
+  operating_hours_start: 6
+  operating_hours_end: 22
+  cycle_period_seconds: 1200
+  on_fraction: 0.5
+"""
+
+
+def _write(tmp_path, text, name="boiler_01.yaml"):
+    path = tmp_path / name
+    path.write_text(text, encoding="utf-8")
+    return str(path)
+
+class TestValidAsset:
+
+    def test_loads_all_sections(self, tmp_path):
+        # Loads every section from a valid asset file.
+        asset = load_asset(_write(tmp_path, VALID_YAML))
+
+        assert asset["asset_id"] == "boiler_01"
+        assert asset["steady_state"]["supply_temperature"] == 65.0
+        assert asset["dynamics"]["cooling_time_constant_seconds"] == 600
+        assert asset["duty_cycle"]["on_fraction"] == 0.5
+
+    def test_output_is_accepted_by_simulator(self, tmp_path):
+        # The loaded config can go straight into the simulator.
+        # The contract that actually matters: what load_asset returns must be
+        # directly usable by simulate() without reshaping.
+        from datetime import datetime, timezone
+        from twin.simulator import simulate
+
+        asset = load_asset(_write(tmp_path, VALID_YAML))
+        readings = simulate(asset, datetime(2026, 8, 20, 6, 5, tzinfo=timezone.utc), 12.0)
+
+        assert readings["power_draw_kw"] == 5.0
+
+class TestMissingFields:
+
+    def test_missing_asset_id(self, tmp_path):
+        # An asset without an ID should fail early.
+        text = VALID_YAML.replace("asset_id: boiler_01\n", "")
+        with pytest.raises(AssetError, match="asset_id"):
+            load_asset(_write(tmp_path, text))
+
+    def test_missing_section(self, tmp_path):
+        # Required YAML sections cannot be left out.
+        text = VALID_YAML.split("dynamics:")[0]
+        with pytest.raises(AssetError, match="dynamics"):
+            load_asset(_write(tmp_path, text))
+
+    def test_missing_field_names_section_and_field(self, tmp_path):
+        # Missing-field errors should point to the exact setting.
+        text = VALID_YAML.replace("  cooling_time_constant_seconds: 600\n", "")
+        with pytest.raises(AssetError, match=r"dynamics\.cooling_time_constant_seconds"):
+            load_asset(_write(tmp_path, text))
+
+    def test_section_that_is_not_a_mapping(self, tmp_path):
+        # Config sections need to be proper YAML mappings.
+        text = VALID_YAML.replace(
+            "dynamics:\n  heating_time_constant_seconds: 25\n  cooling_time_constant_seconds: 600\n",
+            "dynamics: not-a-mapping\n",
+        )
+        with pytest.raises(AssetError, match="dynamics"):
+            load_asset(_write(tmp_path, text))
+
+class TestInvalidValues:
+
+    def test_on_fraction_above_one(self, tmp_path):
+        # Duty-cycle fractions above one are invalid.
+        text = VALID_YAML.replace("on_fraction: 0.5", "on_fraction: 1.5")
+        with pytest.raises(AssetError, match="on_fraction"):
+            load_asset(_write(tmp_path, text))
+
+    def test_on_fraction_zero(self, tmp_path):
+        # A zero duty-cycle fraction is not useful here.
+        text = VALID_YAML.replace("on_fraction: 0.5", "on_fraction: 0")
+        with pytest.raises(AssetError, match="on_fraction"):
+            load_asset(_write(tmp_path, text))
+
+    def test_operating_hours_reversed(self, tmp_path):
+        # Closing time cannot come before opening time.
+        text = VALID_YAML.replace("operating_hours_start: 6", "operating_hours_start: 23")
+        with pytest.raises(AssetError, match="operating hours"):
+            load_asset(_write(tmp_path, text))
+
+class TestFileProblems:
+
+    def test_missing_file(self):
+        # A missing asset file should give a useful error.
+        with pytest.raises(AssetError, match="could not read"):
+            load_asset("/nonexistent/boiler.yaml")
+
+    def test_invalid_yaml(self, tmp_path):
+        # Broken YAML should be rejected cleanly.
+        with pytest.raises(AssetError, match="not valid YAML"):
+            load_asset(_write(tmp_path, "asset_id: [unclosed\n"))
+
+    def test_yaml_that_is_not_a_mapping(self, tmp_path):
+        # The YAML root needs to be a mapping.
+        with pytest.raises(AssetError, match="must be a YAML mapping"):
+            load_asset(_write(tmp_path, "- one\n- two\n"))
+
+===== tests\test_config.py =====
+"""Environment config loading, including the usual bad inputs."""
+
+import pytest
+
+from twin.config import (
+    ConfigError,
+    load_broker_config,
+    load_influx_config,
+    load_workload_config,
+)
+
+ALL_CONFIG_VARS = [
+    "BROKER_HOST", "BROKER_PORT", "BROKER_TLS", "BROKER_AUTH_MODE",
+    "BROKER_USERNAME", "BROKER_PASSWORD",
+    "BROKER_CA_CERT", "BROKER_CLIENT_CERT", "BROKER_CLIENT_KEY",
+    "BROKER_KEEPALIVE", "MQTT_QOS",
+    "INFLUX_URL", "INFLUX_TOKEN", "INFLUX_ORG", "INFLUX_BUCKET",
+    "ASSET_CONFIG_PATH", "PUBLISH_INTERVAL_SECONDS",
+]
+
+
+@pytest.fixture(autouse=True)
+def clean_env(monkeypatch):
+    """
+    Strip every config-relevant variable before each test, regardless of
+    what's set in the shell running pytest. Without this, a variable
+    left over from a real .env would make a "missing variable" test
+    pass by accident, on this machine only.
+    """
+    for name in ALL_CONFIG_VARS:
+        monkeypatch.delenv(name, raising=False)
+
+
+# --- load_broker_config ----------------------------------------------
+
+class TestLoadBrokerConfig:
+
+    def test_password_auth_success(self, monkeypatch):
+        # Loads the normal username/password setup.
+        monkeypatch.setenv("BROKER_HOST", "test-broker.example.com")
+        monkeypatch.setenv("BROKER_PORT", "8883")
+        monkeypatch.setenv("BROKER_TLS", "true")
+        monkeypatch.setenv("BROKER_AUTH_MODE", "password")
+        monkeypatch.setenv("BROKER_USERNAME", "twin-publisher")
+        monkeypatch.setenv("BROKER_PASSWORD", "secret")
+        monkeypatch.setenv("MQTT_QOS", "1") 
+
+        cfg = load_broker_config()
+
+        assert cfg.host == "test-broker.example.com"
+        assert cfg.port == 8883
+        assert cfg.tls is True
+        assert cfg.auth_mode == "password"
+        assert cfg.username == "twin-publisher"
+        assert cfg.password == "secret"
+        assert cfg.ca_cert is None
+        assert cfg.keepalive == 60  # default, not set above
+        assert cfg.qos == 1    
+
+    def test_password_auth_uses_private_ca_when_configured(self, monkeypatch, tmp_path):
+        # Password auth uses private CA when configured.
+        ca = tmp_path / "ca.crt"
+        ca.write_text("placeholder")
+        monkeypatch.setenv("BROKER_HOST", "mosquitto")
+        monkeypatch.setenv("BROKER_PORT", "8883")
+        monkeypatch.setenv("BROKER_TLS", "true")
+        monkeypatch.setenv("BROKER_AUTH_MODE", "password")
+        monkeypatch.setenv("BROKER_USERNAME", "twin")
+        monkeypatch.setenv("BROKER_PASSWORD", "secret")
+        monkeypatch.setenv("BROKER_CA_CERT", str(ca))
+        monkeypatch.setenv("MQTT_QOS", "1")
+
+        cfg = load_broker_config()
+
+        assert cfg.ca_cert == str(ca)
+
+    def test_cert_auth_success(self, monkeypatch, tmp_path):
+        # Loads the certificate-based setup.
+        ca = tmp_path / "ca.pem"
+        cert = tmp_path / "client.pem"
+        key = tmp_path / "client.key"
+        for f in (ca, cert, key):
+            f.write_text("placeholder")
+
+        monkeypatch.setenv("BROKER_HOST", "xxx.iot.eu-west-2.amazonaws.com")
+        monkeypatch.setenv("BROKER_PORT", "8883")
+        monkeypatch.setenv("BROKER_TLS", "true")
+        monkeypatch.setenv("BROKER_AUTH_MODE", "cert")
+        monkeypatch.setenv("BROKER_CA_CERT", str(ca))
+        monkeypatch.setenv("BROKER_CLIENT_CERT", str(cert))
+        monkeypatch.setenv("BROKER_CLIENT_KEY", str(key))
+        monkeypatch.setenv("MQTT_QOS", "1")
+
+        cfg = load_broker_config()
+
+        assert cfg.auth_mode == "cert"
+        assert cfg.username is None
+        assert cfg.ca_cert == str(ca)
+
+    def test_missing_host_names_the_variable(self, monkeypatch):
+        # A missing host error should name BROKER_HOST.
+        monkeypatch.setenv("BROKER_PORT", "8883")
+        monkeypatch.setenv("BROKER_TLS", "true")
+        monkeypatch.setenv("BROKER_AUTH_MODE", "password")
+        monkeypatch.setenv("BROKER_USERNAME", "x")
+        monkeypatch.setenv("BROKER_PASSWORD", "x")
+
+        with pytest.raises(ConfigError, match="BROKER_HOST"):
+            load_broker_config()
+
+    def test_non_integer_port_raises_config_error_not_value_error(self, monkeypatch):
+        # A bad port should still come back as a config error.
+        monkeypatch.setenv("BROKER_HOST", "test")
+        monkeypatch.setenv("BROKER_PORT", "not-a-number")
+        monkeypatch.setenv("BROKER_TLS", "true")
+        monkeypatch.setenv("BROKER_AUTH_MODE", "password")
+        monkeypatch.setenv("BROKER_USERNAME", "x")
+        monkeypatch.setenv("BROKER_PASSWORD", "x")
+
+        with pytest.raises(ConfigError, match="BROKER_PORT"):
+            load_broker_config()
+
+    def test_invalid_auth_mode_rejected(self, monkeypatch):
+        # Invalid auth mode rejected.
+        monkeypatch.setenv("BROKER_HOST", "test")
+        monkeypatch.setenv("BROKER_PORT", "8883")
+        monkeypatch.setenv("BROKER_TLS", "true")
+        monkeypatch.setenv("BROKER_AUTH_MODE", "apikey")  # not a real mode
+
+        with pytest.raises(ConfigError, match="BROKER_AUTH_MODE"):
+            load_broker_config()
+
+    def test_cert_path_that_does_not_exist_is_rejected(self, monkeypatch):
+        # Cert path that does not exist is rejected.
+        monkeypatch.setenv("BROKER_HOST", "test")
+        monkeypatch.setenv("BROKER_PORT", "8883")
+        monkeypatch.setenv("BROKER_TLS", "true")
+        monkeypatch.setenv("BROKER_AUTH_MODE", "cert")
+        monkeypatch.setenv("BROKER_CA_CERT", "/nonexistent/ca.pem")
+        monkeypatch.setenv("BROKER_CLIENT_CERT", "/nonexistent/client.pem")
+        monkeypatch.setenv("BROKER_CLIENT_KEY", "/nonexistent/client.key")
+
+        with pytest.raises(ConfigError, match="BROKER_CA_CERT"):
+            load_broker_config()
+
+    def test_missing_qos_names_the_variable(self, monkeypatch):
+        # A missing QoS error should name MQTT_QOS.
+        monkeypatch.setenv("BROKER_HOST", "test")
+        monkeypatch.setenv("BROKER_PORT", "8883")
+        monkeypatch.setenv("BROKER_TLS", "true")
+        monkeypatch.setenv("BROKER_AUTH_MODE", "password")
+        monkeypatch.setenv("BROKER_USERNAME", "x")
+        monkeypatch.setenv("BROKER_PASSWORD", "x")
+
+        with pytest.raises(ConfigError, match="MQTT_QOS"):
+            load_broker_config()
+
+    def test_invalid_qos_rejected(self, monkeypatch):
+        # Invalid QoS rejected.
+        monkeypatch.setenv("BROKER_HOST", "test")
+        monkeypatch.setenv("BROKER_PORT", "8883")
+        monkeypatch.setenv("BROKER_TLS", "true")
+        monkeypatch.setenv("BROKER_AUTH_MODE", "password")
+        monkeypatch.setenv("BROKER_USERNAME", "x")
+        monkeypatch.setenv("BROKER_PASSWORD", "x")
+        monkeypatch.setenv("MQTT_QOS", "3")
+
+        with pytest.raises(ConfigError, match="MQTT_QOS"):
+            load_broker_config()
+
+# --- load_influx_config ----------------------------------------------
+
+class TestLoadInfluxConfig:
+
+    def test_success(self, monkeypatch):
+        # Loads a complete Influx config.
+        monkeypatch.setenv("INFLUX_URL", "http://localhost:8086")
+        monkeypatch.setenv("INFLUX_TOKEN", "test-token")
+        monkeypatch.setenv("INFLUX_ORG", "digital-twin")
+        monkeypatch.setenv("INFLUX_BUCKET", "telemetry")
+
+        cfg = load_influx_config()
+
+        assert cfg.url == "http://localhost:8086"
+        assert cfg.bucket == "telemetry"
+
+    def test_missing_token_names_the_variable(self, monkeypatch):
+        # A missing token error should name INFLUX_TOKEN.
+        monkeypatch.setenv("INFLUX_URL", "http://localhost:8086")
+        monkeypatch.setenv("INFLUX_ORG", "digital-twin")
+        monkeypatch.setenv("INFLUX_BUCKET", "telemetry")
+
+        with pytest.raises(ConfigError, match="INFLUX_TOKEN"):
+            load_influx_config()
+
+
+# --- load_workload_config ---------------------------------------------
+
+class TestLoadWorkloadConfig:
+
+    def test_success(self, monkeypatch, tmp_path):
+        # Loads a valid workload config.
+        asset_file = tmp_path / "boiler_01.yaml"
+        asset_file.write_text("asset_id: boiler_01")
+        monkeypatch.setenv("ASSET_CONFIG_PATH", str(asset_file))
+        monkeypatch.setenv("PUBLISH_INTERVAL_SECONDS", "30")
+
+        cfg = load_workload_config()
+
+        assert cfg.asset_config_path == str(asset_file)
+        assert cfg.publish_interval_seconds == 30.0
+
+    def test_missing_asset_file_is_rejected(self, monkeypatch):
+        # Missing asset file is rejected.
+        monkeypatch.setenv("ASSET_CONFIG_PATH", "/nonexistent/asset.yaml")
+        monkeypatch.setenv("PUBLISH_INTERVAL_SECONDS", "30")
+
+        with pytest.raises(ConfigError, match="ASSET_CONFIG_PATH"):
+            load_workload_config()
+
+    def test_zero_interval_is_rejected(self, monkeypatch, tmp_path):
+        # Zero interval is rejected.
+        asset_file = tmp_path / "boiler_01.yaml"
+        asset_file.write_text("asset_id: boiler_01")
+        monkeypatch.setenv("ASSET_CONFIG_PATH", str(asset_file))
+        monkeypatch.setenv("PUBLISH_INTERVAL_SECONDS", "0")
+
+        with pytest.raises(ConfigError, match="PUBLISH_INTERVAL_SECONDS"):
+            load_workload_config()
+
+    def test_negative_interval_is_rejected(self, monkeypatch, tmp_path):
+        # Negative interval is rejected.
+        asset_file = tmp_path / "boiler_01.yaml"
+        asset_file.write_text("asset_id: boiler_01")
+        monkeypatch.setenv("ASSET_CONFIG_PATH", str(asset_file))
+        monkeypatch.setenv("PUBLISH_INTERVAL_SECONDS", "-5")
+
+        with pytest.raises(ConfigError, match="PUBLISH_INTERVAL_SECONDS"):
+            load_workload_config()
+
+===== tests\test_deployment_timer.py =====
+"""Small checks around deployment timing and cleanup.
+
+AI prompt used: "Test that a deployment trial cleans before and after measurement,
+  including when polling for the first point raises TimeoutError."
+"""
+
+from pathlib import Path
+from unittest.mock import patch
+
+import pytest
+
+from experiments.deployment_timer import compose_command, measure_trial
+
+
+def test_c1_compose_command_includes_profile_before_subcommand():
+    # C1 compose command includes profile before subcommand.
+    command = compose_command("c1", Path("c1.env"), "timing-c1", "up", "--detach")
+
+    assert command == [
+        "docker", "compose",
+        "--project-name", "timing-c1",
+        "--env-file", "c1.env",
+        "--profile", "c1",
+        "up", "--detach",
+    ]
+
+
+def test_managed_compose_command_has_no_local_broker_profile():
+    # Managed compose command has no local broker profile.
+    command = compose_command("c2a", Path("c2a.env"), "timing-c2a", "up")
+
+    assert "--profile" not in command
+
+
+@patch("experiments.deployment_timer.wait_for_first_point", return_value=4.0)
+@patch("experiments.deployment_timer.compose")
+@patch("experiments.deployment_timer.clean_stack")
+@patch("experiments.deployment_timer.time.monotonic", side_effect=[10.0, 12.0])
+def test_trial_times_startup_and_query_and_cleans_both_sides(
+    monotonic, clean, compose, wait
+):
+    # Times both startup and query, then cleans up both stacks.
+    result = measure_trial(
+        "c1", Path("c1.env"), "timing-c1", {}, timeout=60, poll_interval=0.25
+    )
+
+    assert result["seconds_to_first_datapoint"] == 6.0
+    assert clean.call_count == 2
+    compose.assert_called_once_with(
+        "c1", Path("c1.env"), "timing-c1", "up", "--detach", "--no-build"
+    )
+    wait.assert_called_once()
+
+
+@patch("experiments.deployment_timer.wait_for_first_point", side_effect=TimeoutError)
+@patch("experiments.deployment_timer.compose")
+@patch("experiments.deployment_timer.clean_stack")
+@patch("experiments.deployment_timer.time.monotonic", side_effect=[10.0, 11.0])
+def test_trial_cleans_after_measurement_failure(monotonic, clean, compose, wait):
+    # Trial cleans after measurement failure.
+    with pytest.raises(TimeoutError):
+        measure_trial(
+            "c1", Path("c1.env"), "timing-c1", {}, timeout=60, poll_interval=0.25
+        )
+
+    assert clean.call_count == 2
+
+===== tests\test_fault_injection.py =====
+"""Fault-injection runs, recovery, and message-loss accounting.
+
+AI prompt used: "Write isolated pytest tests proving every outage mode is restored
+  after interruption and the final sequence timestamp is included."
+"""
+
+from unittest.mock import patch
+
+from experiments.fault_injection import (
+    DEFAULT_OUTAGE_SECONDS,
+    FIELDNAMES,
+    container_network,
+    first_event_time,
+    reconcile_sequences,
+    restore_network,
+    sever_network,
+)
+
+from datetime import datetime, timezone
+from datetime import timedelta
+import pytest
+from experiments import fault_injection as fi
+
+
+def test_delivery_waits_for_final_sequence_without_moving_bounds():
+    # Delivery waits for final sequence without moving bounds.
+    start = datetime(2026, 9, 15, tzinfo=timezone.utc)
+    stop = start + timedelta(seconds=30)
+    with patch.object(fi, "stored_sequences", side_effect=[{1}, {1, 2}]) as query, \
+         patch.object(fi.time, "sleep"):
+        assert fi.wait_for_delivery(start, stop, {1, 2}, 10) == {1, 2}
+    assert query.call_count == 2
+    assert all(call.args == (start, stop) for call in query.call_args_list)
+
+
+def test_delivery_timeout_reports_only_observed_sequences():
+    # Delivery timeout reports only observed sequences.
+    start = datetime(2026, 9, 15, tzinfo=timezone.utc)
+    with patch.object(fi, "stored_sequences", return_value={1}), \
+         patch.object(fi.time, "monotonic", side_effect=[0, 10]):
+        assert fi.wait_for_delivery(start, start, {1, 2}, 10) == {1}
+
+
+def test_database_error_is_not_reported_as_message_loss():
+    # Database error is not reported as message loss.
+    with patch.object(fi, "stored_sequences", side_effect=RuntimeError("unavailable")):
+        with pytest.raises(RuntimeError, match="unavailable"):
+            fi.wait_for_delivery(None, None, {1}, 10)
+
+
+def test_recovery_requires_database_delivery_after_restore():
+    # Recovery requires database delivery after restore.
+    restored = datetime(2026, 9, 15, tzinfo=timezone.utc)
+    with patch.object(fi, "stored_sequences", side_effect=[set(), {5}]) as query, \
+         patch.object(fi.time, "sleep"), \
+         patch.object(fi.time, "monotonic", side_effect=[10, 10, 11, 12, 12]):
+        assert fi.confirmed_recovery(restored, 10) == 2
+    assert all(call.args[0] == restored for call in query.call_args_list)
+
+
+@pytest.mark.parametrize("mode", ["storage", "broker", "network"])
+def test_interrupted_outage_restores_target(mode):
+    # Interrupted outage restores target.
+    snapshot = {"timestamp": "2026-09-15T00:00:00+00:00", "sequence": 0}
+    with patch.object(fi, "publisher_snapshot", return_value=snapshot), \
+         patch.object(fi, "container_id", return_value="publisher-id"), \
+         patch.object(fi, "container_network", return_value="network"), \
+         patch.object(fi, "run", return_value=type("Result", (), {"stdout": "{}"})()), \
+         patch.object(fi, "stop_service"), \
+         patch.object(fi, "start_service") as start, \
+         patch.object(fi, "restore_network") as connect, \
+         patch.object(fi.time, "sleep", side_effect=KeyboardInterrupt):
+        with pytest.raises(KeyboardInterrupt):
+            fi.run_trial("c1", mode, 1, 10, 10)
+    if mode == "network":
+        connect.assert_called_once_with("network", "publisher-id")
+    else:
+        start.assert_called_once_with("influxdb" if mode == "storage" else "mosquitto")
+
+
+def test_trial_includes_final_timestamp_and_records_recovery_action():
+    # Trial includes final timestamp and records recovery action.
+    stamp = "2026-09-15T00:00:00+00:00"
+    snapshots = [{"timestamp": stamp, "sequence": n} for n in (0, 2)]
+    with patch.object(fi, "publisher_snapshot", side_effect=snapshots), \
+         patch.object(fi, "container_id", return_value="id"), \
+         patch.object(fi, "stop_service"), patch.object(fi, "start_service"), \
+         patch.object(fi.time, "sleep"), \
+         patch.object(fi, "confirmed_recovery", return_value=3.5), \
+         patch.object(fi, "wait_for_delivery", return_value={1, 2}) as delivery, \
+         patch.object(fi, "logs_since", return_value=[]):
+        row = fi.run_trial("c1", "storage", 1, 10, 10)
+    assert delivery.call_args.args[1] == datetime.fromisoformat(stamp) + timedelta(milliseconds=1)
+    assert row["messages_lost"] == 0
+    assert row["recovery_seconds"] == 3.5
+    assert row["recovery_actions"] == '["compose start influxdb"]'
+
+
+@pytest.mark.parametrize("configuration", ["c1", "c2a", "c2b"])
+def test_compose_explicitly_targets_project_and_configuration(configuration):
+    # Compose explicitly targets project and configuration.
+    with patch.object(fi, "CONFIGURATION", configuration), \
+         patch.object(fi, "COMPOSE_PROJECT", "cloud-run"), \
+         patch.object(fi, "ENV_FILE", "selected.env"), patch.object(fi, "run") as run:
+        fi.compose("ps")
+    command = run.call_args.args[0]
+    assert command[command.index("--project-name") + 1] == "cloud-run"
+    assert command[command.index("--env-file") + 1] == "selected.env"
+    assert ("--profile" in command) == (configuration == "c1")
+
+
+def test_default_outage_exceeds_two_sixty_second_keepalives():
+    # The default outage lasts longer than two keepalive windows.
+    assert DEFAULT_OUTAGE_SECONDS > 120
+
+
+def test_container_network_reads_the_attached_network():
+    # Container network reads the attached network.
+    result = type("Result", (), {"stdout": '{"digital-twin_default": {}}'})()
+    with patch("experiments.fault_injection.run", return_value=result):
+        assert container_network("publisher-id") == "digital-twin_default"
+
+
+def test_network_commands_disconnect_and_connect_the_container():
+    # Network commands disconnect and connect the container.
+    with patch("experiments.fault_injection.container_id", return_value="publisher-id"), \
+         patch("experiments.fault_injection.container_network", return_value="twin-network"), \
+         patch("experiments.fault_injection.run") as command:
+        connection = sever_network("publisher")
+        restore_network(*connection)
+
+    assert connection == ("twin-network", "publisher-id")
+    assert command.call_args_list[0].args[0] == [
+        "docker", "network", "disconnect", "twin-network", "publisher-id"
+    ]
+    assert command.call_args_list[1].args[0] == [
+        "docker", "network", "connect", "twin-network", "publisher-id"
+    ]
+
+
+def test_trial_columns_exclude_inspected_recovery_actions():
+    # Trial columns exclude inspected recovery actions.
+    assert "manual_actions" not in FIELDNAMES
+
+
+def test_write_recovered_can_mark_trial_resumption():
+    # A write-recovered event can mark when the trial resumed.
+    recovered_at = datetime(2026, 9, 9, 12, 0, tzinfo=timezone.utc)
+    entries = [
+        {"event": "write_recovered", "timestamp": recovered_at.isoformat()},
+    ]
+
+    assert first_event_time(entries, {"write_recovered"}) == recovered_at
+
+
+def test_sequence_reconciliation_counts_genuine_loss():
+    # Sequence reconciliation counts genuine loss.
+    assert reconcile_sequences(99, 104, {100, 101, 103, 104}) == {
+        "messages_expected": 5,
+        "messages_stored": 4,
+        "messages_lost": 1,
+    }
+
+
+def test_sequence_reconciliation_ignores_order_and_duplicates():
+    # Sequence reconciliation ignores order and duplicates.
+    stored = {104, 102, 101, 100}
+    assert reconcile_sequences(99, 104, stored) == {
+        "messages_expected": 5,
+        "messages_stored": 4,
+        "messages_lost": 1,
+    }
+
+
+def test_sequence_reconciliation_counts_late_redelivery_as_stored():
+    # Sequence reconciliation counts late redelivery as stored.
+    assert reconcile_sequences(99, 102, {100, 102, 101}) == {
+        "messages_expected": 3,
+        "messages_stored": 3,
+        "messages_lost": 0,
+    }
+
+===== tests\test_logging_setup.py =====
+"""JSON logging setup and the bits we rely on in production."""
+
+import json
+
+from twin.logging_setup import setup_logging
+
+
+def _read_json_lines(capsys):
+    """Parse every line pytest captured on stdout as a JSON object."""
+    captured = capsys.readouterr()
+    return [json.loads(line) for line in captured.out.splitlines() if line.strip()]
+
+
+class TestSetupLogging:
+
+    def test_log_line_is_valid_json_with_required_fields(self, capsys):
+        # Log line is valid JSON with required fields.
+        logger = setup_logging("test.basic_fields")
+        logger.info("connected to broker")
+
+        [record] = _read_json_lines(capsys)
+
+        assert record["level"] == "INFO"
+        assert record["component"] == "test.basic_fields"
+        assert record["message"] == "connected to broker"
+        assert "timestamp" in record
+
+    def test_timestamp_is_iso8601_utc_with_millisecond_precision(self, capsys):
+        # Timestamp is ISO 8601 UTC with millisecond precision.
+        logger = setup_logging("test.timestamp_format")
+        logger.info("tick")
+
+        [record] = _read_json_lines(capsys)
+        timestamp = record["timestamp"]
+
+        assert timestamp.endswith("+00:00")  # UTC offset explicit, not assumed
+
+        fractional = timestamp.split(".")[1].split("+")[0]
+        assert len(fractional) == 3  # milliseconds, e.g. ...22.123+00:00
+
+    def test_extra_fields_are_merged_into_payload(self, capsys):
+        # Extra fields are merged into payload.
+        logger = setup_logging("test.extra_fields")
+        logger.info("reconnect attempt", extra={"asset_id": "boiler_01", "attempt": 3})
+
+        [record] = _read_json_lines(capsys)
+
+        assert record["asset_id"] == "boiler_01"
+        assert record["attempt"] == 3
+
+    def test_exception_info_is_captured(self, capsys):
+        # Exception info is captured.
+        logger = setup_logging("test.exception_info")
+        try:
+            raise ValueError("broker connection refused")
+        except ValueError:
+            logger.exception("connect failed")
+
+        [record] = _read_json_lines(capsys)
+
+        assert "exception" in record
+        assert "ValueError" in record["exception"]
+        assert "broker connection refused" in record["exception"]
+
+    def test_repeated_setup_does_not_duplicate_handlers(self, capsys):
+        # Repeated setup does not duplicate handlers.
+        setup_logging("test.no_duplicates")
+        logger = setup_logging("test.no_duplicates")  # called again, same component
+        logger.info("single line expected")
+
+        assert len(_read_json_lines(capsys)) == 1
+
+    def test_explicit_level_overrides_default(self, capsys):
+        # Explicit level overrides default.
+        logger = setup_logging("test.explicit_level", level="WARNING")
+        logger.info("should be suppressed")
+        logger.warning("should appear")
+
+        records = _read_json_lines(capsys)
+        assert len(records) == 1
+        assert records[0]["message"] == "should appear"
+
+    def test_log_level_env_var_used_when_no_explicit_level(self, monkeypatch, capsys):
+        # Log level env var used when no explicit level.
+        monkeypatch.setenv("LOG_LEVEL", "ERROR")
+
+        logger = setup_logging("test.env_level")
+        logger.warning("should be suppressed")
+        logger.error("should appear")
+
+        records = _read_json_lines(capsys)
+        assert len(records) == 1
+        assert records[0]["message"] == "should appear"
+
+    def test_default_level_is_info_when_nothing_specified(self, capsys):
+        # Default level is info when nothing specified.
+        logger = setup_logging("test.default_level")
+        logger.debug("should be suppressed")
+        logger.info("should appear")
+
+        records = _read_json_lines(capsys)
+        assert len(records) == 1
+        assert records[0]["message"] == "should appear"
+
+    def test_does_not_propagate_to_root_logger(self):
+        # Does not propagate to root logger.
+        logger = setup_logging("test.no_propagate")
+        assert logger.propagate is False
+
+===== tests\test_mqtt_client.py =====
+"""Tests for MQTT client construction and lifecycle handling.
+
+AI prompt used: "Write a pytest test that fires a successful Paho CONNACK callback
+  and verifies connect() restores the client's original on_connect callback."
+"""
+
+from unittest.mock import MagicMock, patch
+import ssl
+
+import paho.mqtt.client as mqtt
+from paho.mqtt.packettypes import PacketTypes
+from paho.mqtt.reasoncodes import ReasonCode
+import pytest
+
+from twin.config import BrokerConfig
+from twin.mqtt_client import (
+    RECONNECT_MAX_DELAY, RECONNECT_MIN_DELAY,
+    MQTTClientError, build_client, connect, disconnect,
+)
+
+
+def _password_config(qos=1, tls=True):
+    return BrokerConfig(
+        host="broker.example.com", port=8883, tls=tls, auth_mode="password",
+        username="twin-publisher", password="secret",
+        ca_cert=None, client_cert=None, client_key=None,
+        keepalive=60, qos=qos,
+    )
+
+
+def _cert_config(qos=1):
+    return BrokerConfig(
+        host="xxx.iot.eu-west-2.amazonaws.com", port=8883, tls=True, auth_mode="cert",
+        username=None, password=None,
+        ca_cert="/certs/ca.pem", client_cert="/certs/client.pem", client_key="/certs/client.key",
+        keepalive=60, qos=qos,
+    )
+
+
+class TestBuildClient:
+
+    def test_client_id_is_applied(self):
+        with patch.object(mqtt.Client, "tls_set"):
+            client = build_client(_password_config(), "twin-publisher-01", "test.build")
+        assert client._client_id == b"twin-publisher-01"
+
+    def test_password_auth_sets_credentials(self):
+        with patch.object(mqtt.Client, "tls_set"):
+            client = build_client(_password_config(), "id-1", "test.pwd")
+        assert client._username == b"twin-publisher"
+        assert client._password == b"secret"
+
+    def test_password_auth_enables_tls_when_configured(self):
+        with patch.object(mqtt.Client, "tls_set") as tls_set:
+            build_client(_password_config(tls=True), "id-2", "test.tls_on")
+        tls_set.assert_called_once()
+
+    def test_password_auth_skips_tls_when_disabled(self):
+        with patch.object(mqtt.Client, "tls_set") as tls_set:
+            build_client(_password_config(tls=False), "id-3", "test.tls_off")
+        tls_set.assert_not_called()
+
+    def test_cert_auth_passes_all_three_certificate_paths(self):
+        with patch.object(mqtt.Client, "tls_set") as tls_set:
+            build_client(_cert_config(), "id-4", "test.cert")
+        kwargs = tls_set.call_args.kwargs
+        assert kwargs["ca_certs"] == "/certs/ca.pem"
+        assert kwargs["certfile"] == "/certs/client.pem"
+        assert kwargs["keyfile"] == "/certs/client.key"
+        assert kwargs["tls_version"] == ssl.PROTOCOL_TLSv1_2
+
+    def test_cert_auth_does_not_set_username(self):
+        with patch.object(mqtt.Client, "tls_set"):
+            client = build_client(_cert_config(), "id-5", "test.cert_nouser")
+        assert client._username is None
+
+    def test_reconnect_backoff_bounds_applied(self):
+        with patch.object(mqtt.Client, "tls_set"):
+            client = build_client(_password_config(), "id-6", "test.backoff")
+        assert client._reconnect_min_delay == RECONNECT_MIN_DELAY
+        assert client._reconnect_max_delay == RECONNECT_MAX_DELAY
+
+    def test_lifecycle_callbacks_are_attached(self):
+        with patch.object(mqtt.Client, "tls_set"):
+            client = build_client(_password_config(), "id-7", "test.callbacks")
+        assert client.on_connect is not None
+        assert client.on_disconnect is not None
+
+    def test_disconnect_callback_logs_numeric_reason_code(self):
+        logger = MagicMock()
+        reason_code = ReasonCode(PacketTypes.DISCONNECT, identifier=128)
+
+        with patch.object(mqtt.Client, "tls_set"), \
+             patch("twin.mqtt_client.setup_logging", return_value=logger):
+            client = build_client(_password_config(), "id-callback", "test.callbacks")
+
+        client.on_disconnect(client, None, {}, reason_code, None)
+
+        extra = logger.warning.call_args.kwargs["extra"]
+        assert extra["reason_code"] == 128
+        assert extra["expected"] is False
+
+
+class TestCleanSessionFollowsQoS:
+    """
+    clean_session is derived from QoS, not set independently: QoS 1 needs a
+    persistent session for the broker to redeliver missed messages, which is
+    the behaviour M3.3 recovery time measures.
+    """
+
+    def test_qos_1_uses_persistent_session(self):
+        with patch.object(mqtt.Client, "tls_set"):
+            client = build_client(_password_config(qos=1), "id-8", "test.qos1")
+        assert client._clean_session is False
+
+    def test_qos_0_uses_clean_session(self):
+        with patch.object(mqtt.Client, "tls_set"):
+            client = build_client(_password_config(qos=0), "id-9", "test.qos0")
+        assert client._clean_session is True
+
+
+class TestConnect:
+
+    def test_unreachable_broker_raises_named_error(self):
+        config = _password_config()
+        with patch.object(mqtt.Client, "tls_set"):
+            client = build_client(config, "id-10", "test.unreachable")
+
+        with patch.object(mqtt.Client, "connect", side_effect=OSError("nodename nor servname provided")):
+            with pytest.raises(MQTTClientError, match="broker.example.com:8883"):
+                connect(client, config)
+
+    def test_no_connack_within_timeout_raises(self):
+        config = _password_config()
+        with patch.object(mqtt.Client, "tls_set"):
+            client = build_client(config, "id-11", "test.timeout")
+
+        # connect() and loop_start() succeed, but no CONNACK callback ever fires
+        with patch.object(mqtt.Client, "connect"), patch.object(mqtt.Client, "loop_start"), \
+            patch.object(mqtt.Client, "loop_stop"):
+            with pytest.raises(MQTTClientError, match="no CONNACK"):
+                connect(client, config, timeout=0.1)
+
+    def test_successful_connack_returns_and_restores_callback(self):
+        config = _password_config()
+        with patch.object(mqtt.Client, "tls_set"):
+            client = build_client(config, "id-12", "test.connack")
+
+        original_on_connect = client.on_connect
+
+        def fire_connack(*args, **kwargs):
+            # Simulate the broker accepting the connection
+            reason_code = ReasonCode(PacketTypes.CONNACK, identifier=0)
+            client.on_connect(client, None, {}, reason_code, None)
+
+        with patch.object(mqtt.Client, "connect"), \
+            patch.object(mqtt.Client, "loop_start", side_effect=fire_connack), \
+            patch.object(mqtt.Client, "loop_stop"):
+            connect(client, config, timeout=1.0)
+
+        assert client.on_connect is original_on_connect
+
+
+class TestDisconnect:
+
+    def test_disconnect_stops_network_loop(self):
+        with patch.object(mqtt.Client, "tls_set"):
+            client = build_client(_password_config(), "id-13", "test.disconnect")
+
+        with patch.object(mqtt.Client, "disconnect") as disc, patch.object(mqtt.Client, "loop_stop") as stop:
+            disconnect(client)
+
+        disc.assert_called_once()
+        stop.assert_called_once()
+
+===== tests\test_payload.py =====
+"""Telemetry payload building, validation, and parsing."""
+
+from datetime import datetime, timezone
+
+import pytest
+
+from twin.payload import CHANNELS, SCHEMA_VERSION, PayloadError, TelemetryPayload, build_payload, parse, serialize
+
+
+def _example_readings():
+    return {
+        "supply_temperature_c": 62.3,
+        "return_temperature_c": 54.1,
+        "ambient_temperature_c": 19.7,
+        "power_draw_kw": 4.85,
+        "setpoint_c": 60.0,
+    }
+
+
+def _example_timestamp():
+    return datetime(2026, 8, 20, 14, 3, 22, 123000, tzinfo=timezone.utc)
+
+
+# --- build_payload -------------------------------------------------
+
+class TestBuildPayload:
+
+    def test_builds_a_valid_payload(self):
+        # Builds a valid payload.
+        payload = build_payload("boiler_01", 4821, _example_timestamp(), _example_readings())
+
+        assert payload.asset_id == "boiler_01"
+        assert payload.sequence == 4821
+        assert payload.schema_version == SCHEMA_VERSION
+        assert payload.timestamp == "2026-08-20T14:03:22.123+00:00"
+        assert payload.supply_temperature_c == 62.3
+
+    def test_rejects_empty_asset_id(self):
+        # Rejects empty asset ID.
+        with pytest.raises(PayloadError, match="asset_id"):
+            build_payload("", 0, _example_timestamp(), _example_readings())
+
+    def test_rejects_negative_sequence(self):
+        # Rejects negative sequence.
+        with pytest.raises(PayloadError, match="sequence"):
+            build_payload("boiler_01", -1, _example_timestamp(), _example_readings())
+
+    def test_rejects_non_integer_sequence(self):
+        # Rejects non integer sequence.
+        with pytest.raises(PayloadError, match="sequence"):
+            build_payload("boiler_01", "4", _example_timestamp(), _example_readings())
+
+    def test_rejects_bool_as_sequence(self):
+        # Rejects bool as sequence.
+        # bool is a subclass of int in Python â€” True would otherwise slip through as 1.
+        with pytest.raises(PayloadError, match="sequence"):
+            build_payload("boiler_01", True, _example_timestamp(), _example_readings())
+
+    def test_rejects_naive_timestamp(self):
+        # Rejects naive timestamp.
+        naive = datetime(2026, 8, 20, 14, 3, 22)  # no tzinfo
+        with pytest.raises(PayloadError, match="timestamp"):
+            build_payload("boiler_01", 0, naive, _example_readings())
+
+    def test_rejects_non_utc_timestamp(self):
+        # Rejects non UTC timestamp.
+        from datetime import timedelta
+
+        bst = timezone(timedelta(hours=1))
+        non_utc = datetime(2026, 8, 20, 14, 3, 22, tzinfo=bst)
+        with pytest.raises(PayloadError, match="UTC"):
+            build_payload("boiler_01", 0, non_utc, _example_readings())
+
+    def test_rejects_missing_channel(self):
+        # Rejects missing channel.
+        readings = _example_readings()
+        del readings["setpoint_c"]
+        with pytest.raises(PayloadError, match="setpoint_c"):
+            build_payload("boiler_01", 0, _example_timestamp(), readings)
+
+    def test_rejects_unexpected_channel(self):
+        # Rejects unexpected channel.
+        readings = _example_readings()
+        readings["humidity_pct"] = 45.0
+        with pytest.raises(PayloadError, match="humidity_pct"):
+            build_payload("boiler_01", 0, _example_timestamp(), readings)
+
+    def test_rejects_non_numeric_channel_value(self):
+        # Rejects non numeric channel value.
+        readings = _example_readings()
+        readings["supply_temperature_c"] = "warm"
+        with pytest.raises(PayloadError, match="supply_temperature_c"):
+            build_payload("boiler_01", 0, _example_timestamp(), readings)
+
+
+# --- round trip ---------------------------------------------------
+
+class TestRoundTrip:
+
+    def test_parse_of_serialize_equals_original(self):
+        # Serializing and parsing gets the same payload back.
+        original = build_payload("boiler_01", 4821, _example_timestamp(), _example_readings())
+        rebuilt = parse(serialize(original))
+
+        assert rebuilt == original
+
+    def test_round_trip_preserves_every_field_value(self):
+        # Round trip preserves every field value.
+        original = build_payload("boiler_01", 4821, _example_timestamp(), _example_readings())
+        rebuilt = parse(serialize(original))
+
+        for channel in CHANNELS:
+            assert getattr(rebuilt, channel) == getattr(original, channel)
+        assert rebuilt.sequence == original.sequence
+        assert rebuilt.timestamp == original.timestamp
+
+
+# --- parse: malformed input -----------------------------------------
+
+class TestParseRejectsMalformedInput:
+
+    def _valid_payload_bytes(self):
+        return serialize(build_payload("boiler_01", 0, _example_timestamp(), _example_readings()))
+
+    def test_rejects_non_json_bytes(self):
+        # Rejects non JSON bytes.
+        with pytest.raises(PayloadError, match="JSON"):
+            parse(b"not json at all")
+
+    def test_rejects_json_that_is_not_an_object(self):
+        # Rejects JSON that is not an object.
+        with pytest.raises(PayloadError, match="JSON object"):
+            parse(b"[1, 2, 3]")
+
+    def test_rejects_missing_field(self):
+        # Rejects missing field.
+        import json
+        data = json.loads(self._valid_payload_bytes())
+        del data["sequence"]
+        with pytest.raises(PayloadError, match="sequence"):
+            parse(json.dumps(data).encode("utf-8"))
+
+    def test_rejects_unexpected_field(self):
+        # Rejects unexpected field.
+        import json
+        data = json.loads(self._valid_payload_bytes())
+        data["extra_field"] = "surprise"
+        with pytest.raises(PayloadError, match="extra_field"):
+            parse(json.dumps(data).encode("utf-8"))
+
+    def test_rejects_wrong_schema_version(self):
+        # Rejects wrong schema version.
+        import json
+        data = json.loads(self._valid_payload_bytes())
+        data["schema_version"] = "2.0"
+        with pytest.raises(PayloadError, match="schema_version"):
+            parse(json.dumps(data).encode("utf-8"))
+
+    def test_rejects_negative_sequence(self):
+        # Rejects negative sequence.
+        import json
+        data = json.loads(self._valid_payload_bytes())
+        data["sequence"] = -5
+        with pytest.raises(PayloadError, match="sequence"):
+            parse(json.dumps(data).encode("utf-8"))
+
+    def test_rejects_non_numeric_channel(self):
+        # Rejects non numeric channel.
+        import json
+        data = json.loads(self._valid_payload_bytes())
+        data["ambient_temperature_c"] = None
+        with pytest.raises(PayloadError, match="ambient_temperature_c"):
+            parse(json.dumps(data).encode("utf-8"))
+
+
+# --- G-2: measured byte size ----------------------------------------
+
+class TestMeasuredByteSize:
+
+    def test_representative_payload_is_248_bytes(self):
+        # Representative payload is 248 bytes.
+        """
+        a slight increase in the inital payload this is 248 bytes compared to the expected 200 but thats fine for now
+
+        If this test ever fails, it means a field was added, removed, or
+        renamed 
+        """
+        payload = build_payload("boiler_01", 4821, _example_timestamp(), _example_readings())
+        raw = serialize(payload)
+
+        assert len(raw) == 248
+
+===== tests\test_publisher.py =====
+"""Publisher timing, outcomes, and progress logging."""
+
+import paho.mqtt.client as mqtt
+
+from twin.publisher import (
+    next_tick_delay,
+    publish_outcome,
+    should_log_progress,
+    sleep_duration,
+    topic_for,
+)
+
+class TestTopic:
+
+    def test_topic_includes_asset_id(self):
+        # Topic includes asset ID.
+        assert topic_for("boiler_01") == "twin/boiler_01/telemetry"
+
+class TestMonotonicScheduling:
+
+    def test_first_interval_when_work_is_instant(self):
+        # Instant work leaves the full first interval.
+        assert next_tick_delay(start=1000.0, sequence=1, interval=30.0, now=1000.0) == 30.0
+
+    def test_work_time_is_subtracted_not_added(self):
+        # Work time comes out of the wait, not on top of it.
+        # Two seconds spent simulating and publishing could mean 28 not 30
+        assert next_tick_delay(start=1000.0, sequence=1, interval=30.0, now=1002.0) == 28.0
+
+    def test_targets_do_not_drift_over_many_ticks(self):
+        # Targets do not drift over many ticks.
+        # Tick 100's target is 3000s after the origin regardless of how long
+        # earlier ticks took. A sleep-fixed-duration loop would be late by the
+        # accumulated per-tick work by this point.
+        start = 1000.0
+        delay = next_tick_delay(start=start, sequence=100, interval=30.0, now=start + 2999.0)
+        assert delay == 1.0
+
+    def test_overrun_returns_negative(self):
+        # An overrun reports how far behind the tick is.
+        # Tick took longer than the interval â€” the caller logs this rather than
+        # silently skipping, since the nominal message count was not met.
+        assert next_tick_delay(start=1000.0, sequence=1, interval=30.0, now=1035.0) == -5.0
+
+    def test_sub_second_interval_supported(self):
+        # Sub-second publish intervals still work.
+        # Load testing may use intervals below one second.
+        assert next_tick_delay(start=0.0, sequence=4, interval=0.25, now=0.5) == 0.5
+
+    def test_elapsed_deadline_never_produces_negative_sleep(self):
+        # Elapsed deadline never produces negative sleep.
+        # The clock can pass the deadline between the loop condition and sleep.
+        assert sleep_duration(deadline=1000.0, now=1000.001) == 0.0
+
+    def test_sleep_slice_is_limited_for_prompt_shutdown(self):
+        # Sleep slice is limited for prompt shutdown.
+        assert sleep_duration(deadline=1010.0, now=1000.0) == 0.5
+
+
+class TestPublishOutcome:
+
+    def test_success_is_accepted(self):
+        # A successful publish result is accepted.
+        assert publish_outcome(1, mqtt.MQTT_ERR_SUCCESS) == "accepted"
+
+    def test_qos_1_no_connection_is_deferred(self):
+        # QoS 1 can defer a publish while disconnected.
+        assert publish_outcome(1, mqtt.MQTT_ERR_NO_CONN) == "deferred"
+
+    def test_qos_0_no_connection_is_failed(self):
+        # QoS 0 fails straight away while disconnected.
+        assert publish_outcome(0, mqtt.MQTT_ERR_NO_CONN) == "failed"
+
+
+class TestProgressCadence:
+
+    def test_logs_every_twentieth_message(self):
+        # Logs every twentieth message.
+        assert should_log_progress(19) is True
+        assert should_log_progress(39) is True
+
+    def test_does_not_log_between_cadence_boundaries(self):
+        # Does not log between cadence boundaries.
+        assert should_log_progress(0) is False
+        assert should_log_progress(18) is False
+        assert should_log_progress(20) is False
+
+===== tests\test_query_integration.py =====
+"""A quick end-to-end check against InfluxDB.
+
+AI prompt used: "Write an InfluxDB integration test with two assets that verifies
+  sequences, count, bounds, cardinality, and an empty future window."
+"""
+
+import os
+from datetime import datetime, timedelta, timezone
+from uuid import uuid4
+
+import pytest
+from influxdb_client import InfluxDBClient, Point, WritePrecision
+from influxdb_client.client.write_api import SYNCHRONOUS
+
+from twin.query import (
+    fetch_point_count,
+    fetch_sequences,
+    fetch_series_cardinality,
+    fetch_time_bounds,
+)
+
+
+pytestmark = [
+    pytest.mark.integration,
+    pytest.mark.skipif(
+        os.environ.get("RUN_INFLUX_INTEGRATION") != "1",
+        reason="set RUN_INFLUX_INTEGRATION=1 to run against InfluxDB",
+    ),
+]
+
+
+@pytest.fixture
+def temporary_bucket():
+    url = os.environ.get("INFLUX_TEST_URL", "http://localhost:8086")
+    token = os.environ["INFLUX_TOKEN"]
+    org = os.environ["INFLUX_ORG"]
+    client = InfluxDBClient(url=url, token=token, org=org)
+    bucket = client.buckets_api().create_bucket(
+        bucket_name=f"query-test-{uuid4().hex}", org=org
+    )
+    try:
+        yield client, bucket.name, org
+    finally:
+        client.buckets_api().delete_bucket(bucket)
+        client.close()
+
+
+def test_queries_known_points_and_empty_window(temporary_bucket):
+    # Queries known points and empty window.
+    client, bucket, org = temporary_bucket
+    write_api = client.write_api(write_options=SYNCHRONOUS)
+    start = datetime.now(timezone.utc).replace(microsecond=0)
+    times = [start + timedelta(seconds=index) for index in range(3)]
+
+    records = [
+        Point("telemetry")
+        .tag("asset_id", "boiler_test")
+        .field("sequence", sequence)
+        .time(timestamp, WritePrecision.S)
+        for sequence, timestamp in zip((2, 4, 5), times)
+    ]
+    records.append(
+        Point("telemetry")
+        .tag("asset_id", "second_asset")
+        .field("sequence", 0)
+        .time(times[0], WritePrecision.S)
+    )
+    write_api.write(bucket=bucket, org=org, record=records)
+
+    stop = start + timedelta(minutes=1)
+    query_api = client.query_api()
+    assert fetch_sequences(query_api, bucket, "boiler_test", start, stop) == {2, 4, 5}
+    assert fetch_point_count(query_api, bucket, "boiler_test", start, stop) == 3
+    assert fetch_time_bounds(query_api, bucket, "boiler_test", start, stop) == (
+        times[0], times[-1]
+    )
+    assert fetch_series_cardinality(query_api, bucket, start, stop) == 2
+
+    empty_start = start + timedelta(days=1)
+    empty_stop = empty_start + timedelta(minutes=1)
+    assert fetch_sequences(
+        query_api, bucket, "boiler_test", empty_start, empty_stop
+    ) == set()
+    assert fetch_time_bounds(
+        query_api, bucket, "boiler_test", empty_start, empty_stop
+    ) == (None, None)
+
+===== tests\test_run_summary.py =====
+"""Run-summary measurements and completed-run selection.
+
+AI prompt used: "Mock logs, InfluxDB queries, volume size, and network counters to
+  verify that create_summary uses one exact publisher start/stop window."
+"""
+
+from datetime import datetime, timezone
+from unittest.mock import MagicMock, patch
+
+import pytest
+
+from experiments.run_summary import (
+    capture_network_counter,
+    create_summary,
+    database_volume_bytes,
+    latest_completed_run,
+    network_measurements,
+    publisher_network_tx_bytes,
+)
+
+
+def test_latest_completed_run_ignores_current_incomplete_run():
+    # Latest completed run ignores current incomplete run.
+    entries = [
+        {"event": "started", "timestamp": "2026-09-10T08:00:00+00:00"},
+        {"event": "stopping", "timestamp": "2026-09-10T08:01:00+00:00"},
+        {"event": "started", "timestamp": "2026-09-10T09:00:00+00:00"},
+    ]
+
+    started, stopped = latest_completed_run(entries)
+
+    assert started["timestamp"] == "2026-09-10T08:00:00+00:00"
+    assert stopped["timestamp"] == "2026-09-10T08:01:00+00:00"
+
+
+def test_latest_completed_run_requires_a_matched_pair():
+    # Latest completed run requires a matched pair.
+    with pytest.raises(RuntimeError, match="no completed run"):
+        latest_completed_run([{"event": "started"}])
+
+
+def test_database_volume_converts_kibibytes_to_bytes():
+    # Database volume converts KiB to bytes.
+    result = type("Result", (), {"stdout": "123\t/var/lib/influxdb2\n"})()
+    with patch("experiments.run_summary.compose", return_value=result):
+        assert database_volume_bytes("c1.env") == 123 * 1024
+
+
+def test_publisher_network_counter_reads_exact_container_value():
+    # Publisher network counter reads exact container value.
+    container = type("Result", (), {"stdout": "publisher-id\n"})()
+    counter = type("Result", (), {"stdout": "8192\n"})()
+    with patch("experiments.run_summary.compose", return_value=container), \
+         patch("experiments.run_summary.run", return_value=counter) as command:
+        assert publisher_network_tx_bytes("c1.env") == ("publisher-id", 8192)
+
+    assert command.call_args.args[0] == [
+        "docker", "exec", "publisher-id",
+        "cat", "/sys/class/net/eth0/statistics/tx_bytes",
+    ]
+
+
+def test_network_measurements_reject_a_stale_run():
+    # Network measurements reject a stale run.
+    capture = {
+        "publisher_started_at": "2026-09-10T07:00:00+00:00",
+        "tx_start_bytes": 100,
+        "tx_end_bytes": 200,
+    }
+    with pytest.raises(RuntimeError, match="different completed run"):
+        network_measurements(
+            capture, datetime(2026, 9, 10, 8, 0, tzinfo=timezone.utc)
+        )
+
+
+def test_network_checkpoint_records_start_and_end_for_one_run(tmp_path):
+    # Network checkpoint records start and end for one run.
+    started_at = datetime(2026, 9, 10, 8, 0, tzinfo=timezone.utc)
+    started = {"event": "started", "timestamp": started_at.isoformat()}
+    capture_file = tmp_path / "network.json"
+
+    with patch("experiments.run_summary.structured_logs", return_value=[started]), \
+         patch(
+             "experiments.run_summary.publisher_network_tx_bytes",
+             side_effect=[("publisher-id", 1000), ("publisher-id", 1450)],
+         ):
+        capture_network_counter("c1", "c1.env", capture_file, "start")
+        capture = capture_network_counter("c1", "c1.env", capture_file, "end")
+
+    assert capture["tx_start_bytes"] == 1000
+    assert capture["tx_end_bytes"] == 1450
+    assert network_measurements(capture, started_at)["publisher_network_tx_bytes"] == 450
+
+
+@patch("experiments.run_summary.database_volume_bytes", return_value=4096)
+@patch("experiments.run_summary.fetch_series_cardinality", return_value=1)
+@patch("experiments.run_summary.fetch_time_bounds")
+@patch("experiments.run_summary.fetch_point_count", return_value=3)
+@patch("experiments.run_summary.InfluxDBClient")
+@patch("experiments.run_summary.dotenv_values")
+@patch("experiments.run_summary.structured_logs")
+def test_create_summary_uses_one_completed_publisher_window(
+    logs, env_values, client_class, point_count, time_bounds, cardinality, volume
+):
+    # Builds the summary from one completed publisher window.
+    start = datetime(2026, 9, 10, 8, 0, tzinfo=timezone.utc)
+    stop = datetime(2026, 9, 10, 8, 1, tzinfo=timezone.utc)
+    logs.return_value = [
+        {
+            "event": "started",
+            "timestamp": start.isoformat(),
+            "interval_seconds": 30,
+        },
+        {
+            "event": "stopping",
+            "timestamp": stop.isoformat(),
+            "messages_accepted": 3,
+            "messages_deferred": 1,
+            "tick_overruns": 0,
+        },
+    ]
+    env_values.return_value = {
+        "INFLUX_TOKEN": "test-token",
+        "INFLUX_ORG": "test-org",
+        "INFLUX_BUCKET": "test-bucket",
+        "ASSET_ID": "boiler_test",
+    }
+    query_api = MagicMock()
+    client_class.return_value.__enter__.return_value.query_api.return_value = query_api
+    time_bounds.return_value = (start, stop)
+
+    network_capture = {
+        "publisher_started_at": start.isoformat(),
+        "start_captured_at": "2026-09-10T08:00:01+00:00",
+        "end_captured_at": "2026-09-10T08:00:59+00:00",
+        "tx_start_bytes": 1000,
+        "tx_end_bytes": 1600,
+    }
+    summary = create_summary("c1", "c1.env", network_capture)
+
+    assert summary["run_duration_seconds"] == 60.0
+    assert summary["stored_message_count"] == 3
+    assert summary["publisher_messages_accepted"] == 3
+    assert summary["publisher_messages_deferred"] == 1
+    assert summary["database_volume_bytes"] == 4096
+    assert summary["publisher_network_tx_bytes"] == 600
+    point_count.assert_called_once_with(
+        query_api, "test-bucket", "boiler_test", start, stop
+    )
+
+===== tests\test_simulator.py =====
+"""Boiler simulation behaviour across a full heating cycle.
+
+AI prompt used: "Write deterministic pytest cases for a boiler duty cycle, UTC input
+  validation, Newton-style heating, gradual cooling, and residual cycle heat."
+"""
+
+from datetime import datetime, timezone, timedelta
+import math
+import pytest
+
+from twin.simulator import simulate
+
+
+@pytest.fixture
+def boiler_config():
+    return {
+        "steady_state": {
+            "supply_temperature": 65.0,
+            "return_temperature": 55.0,
+            "ambient_baseline": 20.0,
+        },
+        "dynamics": {
+            "heating_time_constant_seconds": 25,
+            "cooling_time_constant_seconds": 600,
+        },
+        "duty_cycle": {
+            "operating_hours_start": 6,
+            "operating_hours_end": 22,
+            "cycle_period_seconds": 1200,
+            "on_fraction": 0.5,
+        },
+    }
+
+
+def _timestamp(hour, minute=0, second=0):
+    return datetime(2026, 8, 20, hour, minute, second, tzinfo=timezone.utc)
+
+
+class TestOutsideOperatingHours:
+
+    def test_returns_ambient_before_start(self, boiler_config):
+        # Returns ambient before start.
+        ts = _timestamp(5, 30)
+        result = simulate(boiler_config, ts, 15.0)
+
+        assert result["supply_temperature_c"] == 20.0
+        assert result["return_temperature_c"] == 20.0
+        assert result["power_draw_kw"] == 0.0
+        assert result["ambient_temperature_c"] == 15.0
+
+    def test_returns_ambient_after_end(self, boiler_config):
+        # Returns ambient after end.
+        ts = _timestamp(23, 0)
+        result = simulate(boiler_config, ts, 12.0)
+
+        assert result["supply_temperature_c"] == 20.0
+        assert result["power_draw_kw"] == 0.0
+
+
+class TestBoilerOnOff:
+
+    def test_boiler_on_in_first_half_of_cycle(self, boiler_config):
+        # The boiler is on during the first half of a cycle.
+        # 6am + 5 minutes into the day = first on period (cycle is 20 min, 50% on)
+        ts = _timestamp(6, 5)
+        result = simulate(boiler_config, ts, 15.0)
+
+        assert result["power_draw_kw"] == 5.0
+
+    def test_boiler_off_in_second_half_of_cycle(self, boiler_config):
+        # The boiler is off during the second half of a cycle.
+        # 6am + 15 minutes = in the off period
+        ts = _timestamp(6, 15)
+        result = simulate(boiler_config, ts, 15.0)
+
+        assert result["power_draw_kw"] == 0.0
+
+    def test_boiler_cycles_predictably(self, boiler_config):
+        # Boiler cycles predictably.
+        # Times safely within each on/off state, not at boundaries
+        times_and_expected_power = [
+            (_timestamp(6, 5), 5.0),   # 300s: in on period
+            (_timestamp(6, 12), 0.0),  # 600s + 120s: in off period
+            (_timestamp(6, 25), 5.0),  # 1500s % 1200 = 300s: cycle repeats, on
+            (_timestamp(6, 35), 0.0),  # 1500s + 600s: in off period
+        ]
+
+
+        for ts, expected_power in times_and_expected_power:
+            result = simulate(boiler_config, ts, 15.0)
+            assert result["power_draw_kw"] == expected_power
+
+
+class TestNewtonsCooling:
+
+    def test_supply_temp_on_is_higher_than_baseline(self, boiler_config):
+        # Supply temperature rises above baseline while heating.
+        # Boiler on should have supply temp rising toward setpoint (65Â°C)
+        ts = _timestamp(6, 5)  # In on period
+        result = simulate(boiler_config, ts, 15.0)
+
+        assert result["supply_temperature_c"] > 20.0
+        assert result["supply_temperature_c"] <= 65.0
+
+    # def test_supply_temp_off_approaches_ambient(self, boiler_config):
+    #     # Boiler off should have supply temp at or near ambient baseline
+    #     ts = _timestamp(6, 15)  # In off period
+    #     result = simulate(boiler_config, ts, 15.0)
+
+    #     assert result["supply_temperature_c"] <= 20.0
+    def test_supply_temp_decays_gradually_when_off(self, boiler_config):
+        # Supply temp decays gradually when off.
+        # Cooling is exponential from the end-of-heating temperature toward
+        # ambient, not an instant drop. Values fall as time in the off phase grows.
+        one_minute_off = simulate(boiler_config, _timestamp(6, 11), 15.0)
+        five_minutes_off = simulate(boiler_config, _timestamp(6, 15), 15.0)
+        nine_minutes_off = simulate(boiler_config, _timestamp(6, 19), 15.0)
+
+        assert one_minute_off["supply_temperature_c"] > five_minutes_off["supply_temperature_c"]
+        assert five_minutes_off["supply_temperature_c"] > nine_minutes_off["supply_temperature_c"]
+        assert nine_minutes_off["supply_temperature_c"] > 20.0
+
+    def test_return_temperature_delta_preserved(self, boiler_config):
+        # Keeps the expected gap between supply and return temperatures.
+        # Return should always be supply - 10Â°C
+        ts = _timestamp(6, 5)
+        result = simulate(boiler_config, ts, 15.0)
+
+        delta = result["supply_temperature_c"] - result["return_temperature_c"]
+        assert abs(delta - 10.0) < 0.1
+
+    def test_exponential_approach_heating(self, boiler_config):
+        # Heating follows the expected exponential curve.
+        # At t = one time constant, temp should reach ~63% of the way to target
+        # tau_heat = 25s, so at 25s into an on period:
+        # T = 65 + (20 - 65) * exp(-25/25) = 65 - 45*exp(-1) = 65 - 16.55 â‰ˆ 48.5
+        ts = _timestamp(6, 0, 25)  # 25 seconds into on period at 6:00am
+        result = simulate(boiler_config, ts, 15.0)
+
+        expected = 65.0 + (20.0 - 65.0) * math.exp(-1.0)
+        assert abs(result["supply_temperature_c"] - expected) < 0.5
+
+# def test_exponential_approach_heating(self, boiler_config):
+#     start = simulate(boiler_config, _timestamp(6, 0, 0), 15.0)
+#     after_one_tau = simulate(boiler_config, _timestamp(6, 0, 25), 15.0)
+
+#     expected = 65.0 + (
+#         start["supply_temperature_c"] - 65.0
+#     ) * math.exp(-1.0)
+
+#     assert abs(after_one_tau["supply_temperature_c"] - expected) < 0.5
+
+
+class TestAmbientsAndSetpoint:
+
+    def test_setpoint_always_reported(self, boiler_config):
+        # Setpoint always reported.
+        ts = _timestamp(6, 0)
+        result = simulate(boiler_config, ts, 15.0)
+
+        assert result["setpoint_c"] == 65.0
+
+    def test_ambient_temperature_passed_through(self, boiler_config):
+        # Ambient temperature passed through.
+        ts = _timestamp(6, 0)
+        result = simulate(boiler_config, ts, 12.5)
+
+        assert result["ambient_temperature_c"] == 12.5
+
+
+class TestTimezoneValidation:
+
+    def test_rejects_naive_timestamp(self, boiler_config):
+        # Rejects naive timestamp.
+        ts = datetime(2026, 8, 20, 6, 0, 0)  # No tzinfo
+        with pytest.raises(ValueError, match="UTC"):
+            simulate(boiler_config, ts, 15.0)
+
+    def test_rejects_non_utc_timezone(self, boiler_config):
+        # Rejects non UTC timezone.
+        from datetime import timedelta
+        bst = timezone(timedelta(hours=1))
+        ts = datetime(2026, 8, 20, 6, 0, 0, tzinfo=bst)
+
+        with pytest.raises(ValueError, match="UTC"):
+            simulate(boiler_config, ts, 15.0)
+
+    # def test_cycle_repeats_identically(self, boiler_config):
+    #     # Same position in a later cycle gives the same reading, which is what
+    #     # makes the simulator reproducible across configurations and restarts.
+    #     first = simulate(boiler_config, _timestamp(6, 3), 15.0)
+    #     second = simulate(boiler_config, _timestamp(6, 23), 15.0)
+
+    #     assert first["supply_temperature_c"] == second["supply_temperature_c"]
+
+    def test_later_cycle_starts_warmer_than_cold_start(self, boiler_config):
+        # Later cycle starts warmer than cold start.
+        first_cycle = simulate(
+            boiler_config,
+            _timestamp(6, 0),
+            15.0,
+        )
+        second_cycle = simulate(
+            boiler_config,
+            _timestamp(6, 20),
+            15.0,
+        )
+
+        assert first_cycle["supply_temperature_c"] == 20.0
+        assert second_cycle["supply_temperature_c"] > 20.0
+
+===== tests\test_storage_writer.py =====
+"""Storage conversion, sequence tracking, and write handling.
+
+AI prompt used: "Test that two failed writes followed by successful writes produce
+  exactly one recovery log containing the first recovered sequence."
+"""
+
+from datetime import datetime, timezone
+from unittest.mock import MagicMock
+
+import pytest
+
+from twin.payload import build_payload, serialize
+from twin.storage_writer import (
+    SequenceTracker,
+    WriteFailureState,
+    attach_subscription_callback,
+    handle_message,
+    to_point,
+    topic_for,
+)
+
+def _readings():
+    return {
+        "supply_temperature_c": 62.3,
+        "return_temperature_c": 54.1,
+        "ambient_temperature_c": 19.7,
+        "power_draw_kw": 4.85,
+        "setpoint_c": 60.0,
+    }
+
+
+def _payload(sequence=0, asset_id="boiler_01"):
+    ts = datetime(2026, 8, 20, 14, 3, 22, 123000, tzinfo=timezone.utc)
+    return build_payload(asset_id, sequence, ts, _readings())
+
+
+def _raw(sequence=0, asset_id="boiler_01"):
+    return serialize(_payload(sequence, asset_id))
+
+class TestTopic:
+
+    def test_matches_publisher_topic(self):
+        # Matches publisher topic.
+        # Must agree with publisher.topic_for or nothing is ever received.
+        assert topic_for("boiler_01") == "twin/boiler_01/telemetry"
+
+class TestSubscription:
+
+    def test_subscribes_after_initial_connect_and_reconnect(self):
+        # Subscribes after initial connect and reconnect.
+        client = MagicMock()
+        lifecycle_callback = MagicMock()
+        client.on_connect = lifecycle_callback
+        attach_subscription_callback(client, "twin/boiler_01/telemetry", qos=0)
+
+        success = MagicMock(value=0)
+        success.__eq__.side_effect = lambda other: success.value == other
+        client.on_connect(client, None, {}, success, None)
+        client.on_connect(client, None, {}, success, None)
+
+        assert lifecycle_callback.call_count == 2
+        assert client.subscribe.call_count == 2
+        client.subscribe.assert_called_with("twin/boiler_01/telemetry", qos=0)
+
+class TestToPoint:
+
+    def test_asset_id_is_a_tag(self):
+        # Asset ID is a tag.
+        line = to_point(_payload()).to_line_protocol()
+        assert "asset_id=boiler_01" in line
+
+    def test_all_five_channels_are_fields(self):
+        # All five channels are fields.
+        line = to_point(_payload()).to_line_protocol()
+        for channel in ("supply_temperature_c", "return_temperature_c",
+                        "ambient_temperature_c", "power_draw_kw", "setpoint_c"):
+            assert channel in line
+
+    def test_sequence_is_a_field_not_a_tag(self):
+        # Sequence is a field not a tag.
+        # As a tag, sequence would give unbounded cardinality.
+        line = to_point(_payload(sequence=4821)).to_line_protocol()
+        assert "sequence=4821" in line
+        assert ",sequence=" not in line.split(" ")[0]
+
+    def test_timestamp_comes_from_payload_not_arrival(self):
+        # Timestamp comes from payload not arrival.
+        # 2026-08-20T14:03:22.123Z in milliseconds.
+        line = to_point(_payload()).to_line_protocol()
+        assert line.endswith("1787234602123")
+
+class TestSequenceTracker:
+
+    def test_first_message_is_never_a_gap(self):
+        # First message is never a gap.
+        assert SequenceTracker().check("boiler_01", 0) == 0
+
+    def test_contiguous_messages_report_no_gap(self):
+        # Contiguous messages report no gap.
+        tracker = SequenceTracker()
+        tracker.check("boiler_01", 0)
+        assert tracker.check("boiler_01", 1) == 0
+
+    def test_single_missing_message_reported(self):
+        # Single missing message reported.
+        tracker = SequenceTracker()
+        tracker.check("boiler_01", 0)
+        assert tracker.check("boiler_01", 2) == 1
+
+    def test_multiple_missing_messages_counted(self):
+        # Multiple missing messages counted.
+        tracker = SequenceTracker()
+        tracker.check("boiler_01", 10)
+        assert tracker.check("boiler_01", 25) == 14
+
+    def test_publisher_restart_is_not_counted_as_a_gap(self):
+        # Publisher restart is not counted as a gap.
+        # Sequence restarts at 0 when the publisher process restarts.
+        tracker = SequenceTracker()
+        tracker.check("boiler_01", 500)
+        assert tracker.check("boiler_01", 0) == 0
+
+    def test_redelivered_message_is_not_a_gap(self):
+        # Redelivered message is not a gap.
+        # QoS 1 can redeliver a message already seen.
+        tracker = SequenceTracker()
+        tracker.check("boiler_01", 5)
+        assert tracker.check("boiler_01", 5) == 0
+
+    def test_assets_are_tracked_independently(self):
+        # Assets are tracked independently.
+        tracker = SequenceTracker()
+        tracker.check("boiler_01", 100)
+        assert tracker.check("chiller_02", 0) == 0
+
+
+class TestHandleMessage:
+
+    def test_valid_message_is_written(self):
+        # Valid message is written.
+        write_api = MagicMock()
+        stored = handle_message(_raw(), write_api, "telemetry", SequenceTracker(), MagicMock())
+
+        assert stored is True
+        write_api.write.assert_called_once()
+        assert write_api.write.call_args.kwargs["bucket"] == "telemetry"
+
+    def test_malformed_payload_is_discarded_without_raising(self):
+        # Malformed payload is discarded without raising.
+        write_api = MagicMock()
+        logger = MagicMock()
+
+        stored = handle_message(b"not json", write_api, "telemetry", SequenceTracker(), logger)
+
+        assert stored is False
+        write_api.write.assert_not_called()
+        logger.error.assert_called_once()
+
+    def test_wrong_schema_version_is_discarded(self):
+        # Wrong schema version is discarded.
+        write_api = MagicMock()
+        raw = _raw().replace(b'"1.0"', b'"2.0"')
+
+        stored = handle_message(raw, write_api, "telemetry", SequenceTracker(), MagicMock())
+
+        assert stored is False
+        write_api.write.assert_not_called()
+
+    def test_influx_failure_does_not_raise(self):
+        # Influx failure does not raise.
+        # An exception escaping the MQTT callback kills the network loop thread,
+        # which during a trial would be indistinguishable from broker failure.
+        write_api = MagicMock()
+        write_api.write.side_effect = Exception("connection refused")
+        logger = MagicMock()
+
+        stored = handle_message(_raw(), write_api, "telemetry", SequenceTracker(), logger)
+
+        assert stored is False
+        logger.error.assert_called_once()
+
+    def test_first_success_after_failures_logs_one_recovery(self):
+        # First success after failures logs one recovery.
+        write_api = MagicMock()
+        write_api.write.side_effect = [
+            Exception("connection refused"),
+            Exception("connection refused"),
+            None,
+            None,
+        ]
+        logger = MagicMock()
+        state = WriteFailureState()
+        tracker = SequenceTracker()
+
+        for sequence in range(4):
+            handle_message(
+                _raw(sequence=sequence),
+                write_api,
+                "telemetry",
+                tracker,
+                logger,
+                state,
+            )
+
+        logger.info.assert_called_once()
+        recovery = logger.info.call_args.kwargs["extra"]
+        assert recovery == {
+            "event": "write_recovered",
+            "sequence": 2,
+            "failures_since_last_success": 2,
+        }
+
+    def test_sequence_gap_is_logged(self):
+        # Sequence gap is logged.
+        write_api = MagicMock()
+        logger = MagicMock()
+        tracker = SequenceTracker()
+
+        handle_message(_raw(sequence=0), write_api, "telemetry", tracker, logger)
+        handle_message(_raw(sequence=5), write_api, "telemetry", tracker, logger)
+
+        logger.warning.assert_called_once()
+        assert logger.warning.call_args.kwargs["extra"]["messages_missing"] == 4
+
+    def test_gap_does_not_prevent_storage(self):
+        # Gap does not prevent storage.
+        # A gap is a finding, not a reason to discard the message that revealed it.
+        write_api = MagicMock()
+        tracker = SequenceTracker()
+
+        handle_message(_raw(sequence=0), write_api, "telemetry", tracker, MagicMock())
+        stored = handle_message(_raw(sequence=9), write_api, "telemetry", tracker, MagicMock())
+
+        assert stored is True
+        assert write_api.write.call_count == 2
+
